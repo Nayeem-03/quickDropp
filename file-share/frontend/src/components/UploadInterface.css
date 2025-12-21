@@ -1,0 +1,275 @@
+.upload-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 2rem;
+}
+
+.upload-card {
+  background: white;
+  border-radius: 24px;
+  padding: 3rem;
+  max-width: 600px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.brand {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.logo {
+  font-size: 3rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin: 0;
+  margin-bottom: 0.5rem;
+}
+
+.tagline {
+  color: #666;
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.upload-zone {
+  margin-top: 2rem;
+}
+
+.upload-label {
+  display: block;
+  border: 3px dashed #ddd;
+  border-radius: 16px;
+  padding: 3rem 2rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.upload-label:hover {
+  border-color: #667eea;
+  background: #f8f9ff;
+  transform: translateY(-2px);
+}
+
+.upload-prompt {
+  text-align: center;
+}
+
+.upload-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.prompt-text {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 0.5rem 0;
+}
+
+.prompt-hint {
+  color: #999;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.file-info {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.file-icon {
+  font-size: 3rem;
+}
+
+.file-details {
+  flex: 1;
+  text-align: left;
+}
+
+.file-name {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: #333;
+  margin: 0 0 0.25rem 0;
+  word-break: break-all;
+}
+
+.file-size {
+  color: #999;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.btn-upload {
+  width: 100%;
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.btn-upload:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+}
+
+.progress-section {
+  margin-top: 2rem;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.progress-label {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: #333;
+}
+
+.progress-percent {
+  font-weight: 700;
+  font-size: 1.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.progress-bar {
+  height: 12px;
+  background: #eee;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  transition: width 0.3s ease;
+  border-radius: 10px;
+}
+
+.upload-controls {
+  display: flex;
+  gap: 1rem;
+}
+
+.btn-control {
+  flex: 1;
+  padding: 0.85rem;
+  border: 2px solid #ddd;
+  background: white;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-control:hover {
+  transform: translateY(-2px);
+}
+
+.btn-primary {
+  border-color: #667eea;
+  color: #667eea;
+}
+
+.btn-primary:hover {
+  background: #667eea;
+  color: white;
+}
+
+.btn-danger {
+  border-color: #f56565;
+  color: #f56565;
+}
+
+.btn-danger:hover {
+  background: #f56565;
+  color: white;
+}
+
+.success-section {
+  text-align: center;
+  margin-top: 2rem;
+}
+
+.success-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.success-title {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #333;
+  margin: 0 0 1.5rem 0;
+}
+
+.share-box {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.share-input {
+  flex: 1;
+  padding: 1rem;
+  border: 2px solid #667eea;
+  border-radius: 10px;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.btn-copy {
+  padding: 1rem 1.5rem;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-copy:hover {
+  background: #764ba2;
+  transform: translateY(-2px);
+}
+
+.btn-another {
+  width: 100%;
+  padding: 1rem;
+  background: white;
+  border: 2px solid #ddd;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-another:hover {
+  border-color: #667eea;
+  color: #667eea;
+  transform: translateY(-2px);
+}
