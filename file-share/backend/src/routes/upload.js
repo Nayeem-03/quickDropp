@@ -4,14 +4,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
+import bcrypt from 'bcryptjs';
 import { saveFileMetadata, getFileMetadata } from '../utils/storage.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
-
-// Store file metadata in persistent JSON (removed in-memory Map)
 
 // Configure multer for chunk uploads
 const storage = multer.diskStorage({
@@ -42,8 +41,20 @@ const upload = multer({ storage });
 // Initialize upload - create file entry
 router.post('/init', async (req, res) => {
     try {
-        const { fileName, fileSize, mimeType, chunkCount } = req.body;
+        const { fileName, fileSize, mimeType, chunkCount, expiryMs, selfDestruct, password } = req.body;
         const fileId = uuidv4();
+
+        // Calculate expiry time
+        let expiresAt = null;
+        if (expiryMs > 0) {
+            expiresAt = new Date(Date.now() + expiryMs).toISOString();
+        }
+
+        // Hash password if provided
+        let passwordHash = null;
+        if (password) {
+            passwordHash = await bcrypt.hash(password, 10);
+        }
 
         // Save to Persistent Storage
         await saveFileMetadata(fileId, {
@@ -54,7 +65,10 @@ router.post('/init', async (req, res) => {
             chunkCount,
             uploadedChunks: [],
             createdAt: new Date(),
-            status: 'uploading'
+            status: 'uploading',
+            expiresAt,
+            selfDestruct: selfDestruct || false,
+            passwordHash
         });
 
         res.json({

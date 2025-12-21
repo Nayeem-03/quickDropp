@@ -70,3 +70,24 @@ export async function getFileMetadata(fileId) {
         }
     });
 }
+
+export async function deleteFileMetadata(fileId) {
+    const operation = async () => {
+        try {
+            await initDB();
+            const content = await fs.readFile(DB_PATH, 'utf8');
+            const data = content ? JSON.parse(content) : {};
+
+            if (data[fileId]) {
+                delete data[fileId];
+                await fs.writeFile(DB_PATH, JSON.stringify(data, null, 2));
+            }
+        } catch (err) {
+            console.error('[Storage] Delete error:', err.message);
+        }
+    };
+
+    const result = writeQueue.then(operation);
+    writeQueue = result.catch(() => { });
+    return result;
+}

@@ -32,7 +32,10 @@ export class UploadManager {
                 fileName: file.name,
                 fileSize: file.size,
                 mimeType: file.type,
-                chunkCount: totalChunks
+                chunkCount: totalChunks,
+                expiryMs: options.expiryMs || 0,
+                selfDestruct: options.selfDestruct || false,
+                password: options.password || null
             })
         });
 
@@ -160,12 +163,8 @@ export class UploadManager {
 
     cancel() {
         this.state = 'cancelled';
-        for (const [index, controller] of this.abortControllers) {
-            try {
-                controller.abort();
-            } catch (e) {
-                // AbortError is expected - ignore it
-            }
+        for (const controller of this.abortControllers.values()) {
+            controller.abort();
         }
         this.abortControllers.clear();
     }
