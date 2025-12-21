@@ -1,153 +1,137 @@
 import { API_URL } from '../config.js';
 
-// Upload Manager - Handles parallel chunked uploads with S3 backend
+// Upload Manager - Direct to S3 with presigned URLs
 export class UploadManager {
     constructor() {
         this.state = 'idle';
-        this.abortControllers = new Map();
-        this.uploadedChunks = new Set();
+        this.abortController = null;
         this.fileId = null;
-        this.pauseResolver = null;
     }
 
     reset() {
         this.state = 'idle';
-        this.abortControllers.clear();
-        this.uploadedChunks.clear();
+        this.abortController = null;
         this.fileId = null;
-        this.pauseResolver = null;
     }
 
     async uploadFile(file, options = {}) {
         this.reset();
-
-        const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
-        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-
-        // Initialize upload
-        const initResponse = await fetch(`${API_URL}/api/upload/init`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                fileName: file.name,
-                fileSize: file.size,
-                mimeType: file.type,
-                chunkCount: totalChunks,
-                expiryMs: options.expiryMs || 0,
-                selfDestruct: options.selfDestruct || false,
-                password: options.password || null
-            })
-        });
-
-        const { fileId } = await initResponse.json();
-        this.fileId = fileId;
-        this.state = 'uploading';
-
-        // Upload chunks in parallel
-        const PARALLEL_UPLOADS = 3;
-        for (let i = 0; i < totalChunks; i += PARALLEL_UPLOADS) {
-            const batch = [];
-
-            for (let j = 0; j < PARALLEL_UPLOADS && i + j < totalChunks; j++) {
-                const chunkIndex = i + j;
-
-                if (this.state === 'paused') await this.waitForResume();
-                if (this.state === 'cancelled') return { success: false, cancelled: true };
-                if (this.uploadedChunks.has(chunkIndex)) continue;
-
-                batch.push(this.uploadChunk(file, fileId, chunkIndex, CHUNK_SIZE));
-            }
-
-            try {
-                await Promise.all(batch);
-            } catch (error) {
-                if (this.state === 'cancelled' || error.name === 'AbortError') {
-                    return { success: false, cancelled: true };
-                }
-                throw error;
-            }
-        }
-
-        // Complete upload
-        const completeResponse = await fetch(`${API_URL}/api/upload/complete`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fileId })
-        });
-
-        const { shareLink, fileName } = await completeResponse.json();
-        this.state = 'completed';
-
-        return { success: true, fileId, shareLink, fileName };
-    }
-
-    async uploadChunk(file, fileId, chunkIndex, chunkSize) {
-        const start = chunkIndex * chunkSize;
-        const end = Math.min(start + chunkSize, file.size);
-        const chunk = file.slice(start, end);
-
-        const formData = new FormData();
-        formData.append('fileId', fileId);
-        formData.append('chunkIndex', chunkIndex);
-        formData.append('chunk', chunk);
-
-        const controller = new AbortController();
-        this.abortControllers.set(chunkIndex, controller);
-
-        const MAX_RETRIES = 3;
-        let attempt = 0;
+        this.abortController = new AbortController();
 
         try {
-            while (attempt < MAX_RETRIES) {
-                try {
-                    const response = await fetch(`${API_URL}/api/upload/chunk`, {
-                        method: 'POST',
-                        body: formData,
-                        signal: controller.signal
-                    });
+            // 1. Initialize upload - get presigned URL(s)
+            const initResponse = await fetch(`${API_URL}/api/upload/init`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fileName: file.name,
+                    fileSize: file.size,
+                    mimeType: file.type || 'application/octet-stream',
+                    expiryMs: options.expiryMs || 0,
+                    selfDestruct: options.selfDestruct || false,
+                    password: options.password || null
+                }),
+                signal: this.abortController.signal
+            });
 
-                    if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
+            if (!initResponse.ok) throw new Error('Failed to initialize upload');
 
-                    this.uploadedChunks.add(chunkIndex);
-                    this.onProgress?.({
-                        chunkIndex,
-                        totalChunks: Math.ceil(file.size / chunkSize),
-                        uploadedChunks: this.uploadedChunks.size
-                    });
-                    break;
-
-                } catch (error) {
-                    if (error.name === 'AbortError') throw error;
-                    attempt++;
-                    if (attempt === MAX_RETRIES) throw error;
-                    await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
-                }
-            }
-        } finally {
-            this.abortControllers.delete(chunkIndex);
-        }
-    }
-
-    pause() {
-        if (this.state === 'uploading') this.state = 'paused';
-    }
-
-    resume() {
-        if (this.state === 'paused') {
+            const initData = await initResponse.json();
+            this.fileId = initData.fileId;
             this.state = 'uploading';
-            this.pauseResolver?.();
+
+            let parts = [];
+
+            if (initData.multipart) {
+                // Multipart upload for large files
+                parts = await this.uploadMultipart(file, initData.partUrls, initData.chunkSize);
+            } else {
+                // Single upload for small files
+                await this.uploadSingle(file, initData.uploadUrl);
+            }
+
+            if (this.state === 'cancelled') {
+                return { success: false, cancelled: true };
+            }
+
+            // 3. Complete upload
+            const completeResponse = await fetch(`${API_URL}/api/upload/complete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fileId: this.fileId,
+                    parts: parts.length > 0 ? parts : undefined
+                }),
+                signal: this.abortController.signal
+            });
+
+            if (!completeResponse.ok) throw new Error('Failed to complete upload');
+
+            const { shareLink, fileName } = await completeResponse.json();
+            this.state = 'completed';
+
+            return { success: true, fileId: this.fileId, shareLink, fileName };
+
+        } catch (error) {
+            if (error.name === 'AbortError' || this.state === 'cancelled') {
+                return { success: false, cancelled: true };
+            }
+            console.error('Upload error:', error);
+            throw error;
         }
+    }
+
+    async uploadSingle(file, uploadUrl) {
+        const response = await fetch(uploadUrl, {
+            method: 'PUT',
+            body: file,
+            headers: {
+                'Content-Type': file.type || 'application/octet-stream'
+            },
+            signal: this.abortController.signal
+        });
+
+        if (!response.ok) throw new Error('S3 upload failed');
+
+        this.onProgress?.({ uploadedChunks: 1, totalChunks: 1 });
+    }
+
+    async uploadMultipart(file, partUrls, chunkSize) {
+        const parts = [];
+        const totalParts = partUrls.length;
+
+        for (let i = 0; i < partUrls.length; i++) {
+            if (this.state === 'cancelled') break;
+
+            const { partNumber, url } = partUrls[i];
+            const start = i * chunkSize;
+            const end = Math.min(start + chunkSize, file.size);
+            const chunk = file.slice(start, end);
+
+            const response = await fetch(url, {
+                method: 'PUT',
+                body: chunk,
+                signal: this.abortController.signal
+            });
+
+            if (!response.ok) throw new Error(`Part ${partNumber} upload failed`);
+
+            // Get ETag from response for completing multipart
+            const etag = response.headers.get('ETag');
+            parts.push({ PartNumber: partNumber, ETag: etag });
+
+            this.onProgress?.({ uploadedChunks: i + 1, totalChunks: totalParts });
+        }
+
+        return parts;
     }
 
     cancel() {
         this.state = 'cancelled';
-        for (const controller of this.abortControllers.values()) {
-            controller.abort();
-        }
-        this.abortControllers.clear();
+        this.abortController?.abort();
     }
 
-    waitForResume() {
-        return new Promise(resolve => { this.pauseResolver = resolve; });
-    }
+    // Pause/Resume not supported with presigned URLs
+    pause() { console.warn('Pause not supported with direct S3 upload'); }
+    resume() { console.warn('Resume not supported with direct S3 upload'); }
 }
