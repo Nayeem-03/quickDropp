@@ -1,4 +1,6 @@
-// Upload Manager - Handles parallel chunked uploads with local storage backend
+import { API_URL } from '../config.js';
+
+// Upload Manager - Handles parallel chunked uploads with S3 backend
 export class UploadManager {
     constructor() {
         this.state = 'idle';
@@ -8,7 +10,6 @@ export class UploadManager {
         this.pauseResolver = null;
     }
 
-    // Reset state for a fresh upload
     reset() {
         this.state = 'idle';
         this.abortControllers.clear();
@@ -18,14 +19,13 @@ export class UploadManager {
     }
 
     async uploadFile(file, options = {}) {
-        // Reset any stale state from previous uploads
         this.reset();
 
-        const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks for local testing
+        const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
         // Initialize upload
-        const initResponse = await fetch('http://localhost:5000/api/upload/init', {
+        const initResponse = await fetch(`${API_URL}/api/upload/init`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -44,24 +44,16 @@ export class UploadManager {
         this.state = 'uploading';
 
         // Upload chunks in parallel
-        const PARALLEL_UPLOADS = 3; // Reduced for local storage
+        const PARALLEL_UPLOADS = 3;
         for (let i = 0; i < totalChunks; i += PARALLEL_UPLOADS) {
             const batch = [];
 
             for (let j = 0; j < PARALLEL_UPLOADS && i + j < totalChunks; j++) {
                 const chunkIndex = i + j;
 
-                if (this.state === 'paused') {
-                    await this.waitForResume();
-                }
-
-                if (this.state === 'cancelled') {
-                    return { success: false, cancelled: true };
-                }
-
-                if (this.uploadedChunks.has(chunkIndex)) {
-                    continue;
-                }
+                if (this.state === 'paused') await this.waitForResume();
+                if (this.state === 'cancelled') return { success: false, cancelled: true };
+                if (this.uploadedChunks.has(chunkIndex)) continue;
 
                 batch.push(this.uploadChunk(file, fileId, chunkIndex, CHUNK_SIZE));
             }
@@ -69,16 +61,15 @@ export class UploadManager {
             try {
                 await Promise.all(batch);
             } catch (error) {
-                // If cancelled, return gracefully
                 if (this.state === 'cancelled' || error.name === 'AbortError') {
                     return { success: false, cancelled: true };
                 }
-                throw error; // Re-throw other errors
+                throw error;
             }
         }
 
         // Complete upload
-        const completeResponse = await fetch('http://localhost:5000/api/upload/complete', {
+        const completeResponse = await fetch(`${API_URL}/api/upload/complete`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ fileId })
@@ -109,38 +100,27 @@ export class UploadManager {
         try {
             while (attempt < MAX_RETRIES) {
                 try {
-                    const response = await fetch('http://localhost:5000/api/upload/chunk', {
+                    const response = await fetch(`${API_URL}/api/upload/chunk`, {
                         method: 'POST',
                         body: formData,
                         signal: controller.signal
                     });
 
-                    if (!response.ok) throw new Error(`Upload failed with status: ${response.status}`);
+                    if (!response.ok) throw new Error(`Upload failed: ${response.status}`);
 
                     this.uploadedChunks.add(chunkIndex);
-
-                    // Emit progress
                     this.onProgress?.({
                         chunkIndex,
                         totalChunks: Math.ceil(file.size / chunkSize),
                         uploadedChunks: this.uploadedChunks.size
                     });
-
-                    // Success - break loop
                     break;
 
                 } catch (error) {
                     if (error.name === 'AbortError') throw error;
-
                     attempt++;
-                    console.warn(`Chunk ${chunkIndex} failed (attempt ${attempt}/${MAX_RETRIES}):`, error.message);
-
-                    if (attempt === MAX_RETRIES) {
-                        throw error;
-                    }
-
-                    // Wait before retry (exponential backoff: 500ms, 1000ms, 2000ms)
-                    await new Promise(resolve => setTimeout(resolve, 500 * Math.pow(2, attempt - 1)));
+                    if (attempt === MAX_RETRIES) throw error;
+                    await new Promise(r => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
                 }
             }
         } finally {
@@ -149,9 +129,7 @@ export class UploadManager {
     }
 
     pause() {
-        if (this.state === 'uploading') {
-            this.state = 'paused';
-        }
+        if (this.state === 'uploading') this.state = 'paused';
     }
 
     resume() {
@@ -170,8 +148,6 @@ export class UploadManager {
     }
 
     waitForResume() {
-        return new Promise(resolve => {
-            this.pauseResolver = resolve;
-        });
+        return new Promise(resolve => { this.pauseResolver = resolve; });
     }
 }

@@ -1,6 +1,8 @@
+import dotenv from 'dotenv';
+dotenv.config(); // Must be FIRST before any other imports that use env vars
+
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs/promises';
@@ -9,8 +11,6 @@ import fileRoutes from './routes/file.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -22,9 +22,9 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Create uploads directory
-const uploadsDir = path.join(__dirname, '..', process.env.UPLOAD_DIR || 'uploads');
-await fs.mkdir(uploadsDir, { recursive: true });
+// Create temp directory for chunk uploads
+const tempDir = path.join(__dirname, '..', 'temp');
+await fs.mkdir(tempDir, { recursive: true });
 
 // Routes
 app.get('/health', (req, res) => {
@@ -34,10 +34,7 @@ app.get('/health', (req, res) => {
 app.use('/api/upload', uploadRoutes);
 app.use('/api/files', fileRoutes);
 
-// Serve uploaded files
-app.use('/uploads', express.static(uploadsDir));
-
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📁 Files stored in: ${uploadsDir}`);
+  console.log(`☁️  Using AWS S3 for file storage`);
 });

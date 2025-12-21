@@ -1,7 +1,7 @@
 import express from 'express';
-import fs from 'fs/promises';
 import bcrypt from 'bcryptjs';
 import { getFileMetadata, deleteFileMetadata } from '../utils/storage.js';
+import { getSignedDownloadUrl, deleteFromS3 } from '../utils/s3.js';
 
 const router = express.Router();
 
@@ -11,17 +11,17 @@ const isExpired = (metadata) => {
     return new Date(metadata.expiresAt) < new Date();
 };
 
-// Delete file and metadata
-const deleteFile = async (fileId, filePath) => {
+// Delete file from S3 and metadata
+const deleteFile = async (fileId) => {
     try {
-        if (filePath) await fs.unlink(filePath);
+        await deleteFromS3(fileId);
         await deleteFileMetadata(fileId);
     } catch (err) {
         console.error('Delete error:', err.message);
     }
 };
 
-// Get file info (checks if password protected)
+// Get file info
 router.get('/:fileId', async (req, res) => {
     try {
         const { fileId } = req.params;
@@ -32,7 +32,7 @@ router.get('/:fileId', async (req, res) => {
         }
 
         if (isExpired(metadata)) {
-            await deleteFile(fileId, metadata.filePath);
+            await deleteFile(fileId);
             return res.status(410).json({ error: 'File has expired' });
         }
 
@@ -49,7 +49,7 @@ router.get('/:fileId', async (req, res) => {
     }
 });
 
-// Verify password for protected files
+// Verify password
 router.post('/verify/:fileId', async (req, res) => {
     try {
         const { fileId } = req.params;
@@ -77,20 +77,20 @@ router.post('/verify/:fileId', async (req, res) => {
     }
 });
 
-// Download file (requires password in header if protected)
-router.get('/download/:fileId', async (req, res) => {
+// Get download URL (returns signed S3 URL)
+router.post('/download/:fileId', async (req, res) => {
     try {
         const { fileId } = req.params;
-        const password = req.headers['x-file-password'];
+        const { password } = req.body;
 
         const metadata = await getFileMetadata(fileId);
 
-        if (!metadata || !metadata.filePath) {
+        if (!metadata || metadata.status !== 'completed') {
             return res.status(404).json({ error: 'File not found' });
         }
 
         if (isExpired(metadata)) {
-            await deleteFile(fileId, metadata.filePath);
+            await deleteFile(fileId);
             return res.status(410).json({ error: 'File has expired' });
         }
 
@@ -105,30 +105,23 @@ router.get('/download/:fileId', async (req, res) => {
             }
         }
 
-        try {
-            await fs.access(metadata.filePath);
-        } catch {
-            return res.status(404).json({ error: 'File missing from disk' });
+        // Get signed URL from S3
+        const downloadUrl = await getSignedDownloadUrl(fileId, metadata.fileName);
+
+        // Handle self-destruct
+        if (metadata.selfDestruct) {
+            // Delete after providing URL (give some time for download to start)
+            setTimeout(async () => {
+                console.log(`Self-destructing file: ${fileId}`);
+                await deleteFile(fileId);
+            }, 60000); // 1 minute delay
         }
 
-        res.setHeader('Content-Disposition', `attachment; filename="${metadata.fileName}"`);
-        res.setHeader('Content-Type', metadata.mimeType || 'application/octet-stream');
-        res.setHeader('Content-Length', metadata.fileSize);
-
-        res.sendFile(metadata.filePath, async (err) => {
-            if (err) {
-                console.error('Send file error:', err);
-            } else if (metadata.selfDestruct) {
-                console.log(`Self-destructing file: ${fileId}`);
-                await deleteFile(fileId, metadata.filePath);
-            }
-        });
+        res.json({ downloadUrl, fileName: metadata.fileName });
 
     } catch (error) {
         console.error('Download error:', error);
-        if (!res.headersSent) {
-            res.status(500).json({ error: 'Download failed' });
-        }
+        res.status(500).json({ error: 'Download failed' });
     }
 });
 

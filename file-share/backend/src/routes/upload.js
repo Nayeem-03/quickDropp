@@ -6,21 +6,22 @@ import fs from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
 import { saveFileMetadata, getFileMetadata } from '../utils/storage.js';
+import { uploadToS3 } from '../utils/s3.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 
-// Configure multer for chunk uploads
+// Configure multer for chunk uploads (temporary local storage)
 const storage = multer.diskStorage({
     destination: async (req, file, cb) => {
         try {
-            const uploadsDir = path.join(__dirname, '..', '..', process.env.UPLOAD_DIR || 'uploads');
+            const uploadsDir = path.join(__dirname, '..', '..', 'temp');
             const fileId = req.body.fileId || req.headers['x-file-id'];
 
             if (!fileId) {
-                return cb(new Error('Missing fileId - ensure it is sent before the file in FormData'));
+                return cb(new Error('Missing fileId'));
             }
 
             const chunkDir = path.join(uploadsDir, fileId);
@@ -38,25 +39,22 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// Initialize upload - create file entry
+// Initialize upload
 router.post('/init', async (req, res) => {
     try {
         const { fileName, fileSize, mimeType, chunkCount, expiryMs, selfDestruct, password } = req.body;
         const fileId = uuidv4();
 
-        // Calculate expiry time
         let expiresAt = null;
         if (expiryMs > 0) {
             expiresAt = new Date(Date.now() + expiryMs).toISOString();
         }
 
-        // Hash password if provided
         let passwordHash = null;
         if (password) {
             passwordHash = await bcrypt.hash(password, 10);
         }
 
-        // Save to Persistent Storage
         await saveFileMetadata(fileId, {
             fileId,
             fileName,
@@ -68,13 +66,11 @@ router.post('/init', async (req, res) => {
             status: 'uploading',
             expiresAt,
             selfDestruct: selfDestruct || false,
-            passwordHash
+            passwordHash,
+            s3Key: fileId // S3 object key
         });
 
-        res.json({
-            fileId,
-            message: 'Upload initialized'
-        });
+        res.json({ fileId, message: 'Upload initialized' });
     } catch (error) {
         console.error('Init error:', error);
         res.status(500).json({ error: 'Failed to initialize upload' });
@@ -88,7 +84,7 @@ router.post('/chunk', upload.single('chunk'), async (req, res) => {
 
         const metadata = await getFileMetadata(fileId);
         if (!metadata) {
-            return res.status(404).json({ error: 'File not found - metadata missing' });
+            return res.status(404).json({ error: 'File not found' });
         }
 
         metadata.uploadedChunks.push(parseInt(chunkIndex));
@@ -106,51 +102,47 @@ router.post('/chunk', upload.single('chunk'), async (req, res) => {
     }
 });
 
-// Complete upload - merge chunks
+// Complete upload - merge chunks and upload to S3
 router.post('/complete', async (req, res) => {
     try {
         const { fileId } = req.body;
 
         const metadata = await getFileMetadata(fileId);
         if (!metadata) {
-            return res.status(404).json({ error: 'File not found - metadata missing' });
+            return res.status(404).json({ error: 'File not found' });
         }
 
-        const uploadsDir = path.join(__dirname, '..', '..', process.env.UPLOAD_DIR || 'uploads');
-        const chunkDir = path.join(uploadsDir, fileId);
+        const tempDir = path.join(__dirname, '..', '..', 'temp');
+        const chunkDir = path.join(tempDir, fileId);
 
-        // Sanitize filename to prevent invalid paths
-        const safeFileName = metadata.fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-        const finalPath = path.join(uploadsDir, `${fileId}_${safeFileName}`);
-
-        // Merge chunks
-        const writeStream = await fs.open(finalPath, 'w');
+        // Merge chunks into a single buffer
+        const chunks = [];
         for (let i = 0; i < metadata.chunkCount; i++) {
             const chunkPath = path.join(chunkDir, `chunk_${i}`);
-            // Check if chunk exists
             try {
-                await fs.access(chunkPath);
+                const chunkData = await fs.readFile(chunkPath);
+                chunks.push(chunkData);
             } catch {
-                throw new Error(`Missing chunk ${i} - upload incomplete`);
+                throw new Error(`Missing chunk ${i}`);
             }
-
-            const chunkData = await fs.readFile(chunkPath);
-            await writeStream.write(chunkData);
         }
-        await writeStream.close();
+        const fileBuffer = Buffer.concat(chunks);
 
-        // Cleanup chunks (don't fail request if cleanup fails)
+        // Upload to S3
+        await uploadToS3(fileId, fileBuffer, metadata.mimeType);
+
+        // Cleanup temp chunks
         try {
             await fs.rm(chunkDir, { recursive: true, force: true });
         } catch (cleanupError) {
             console.warn('Cleanup warning:', cleanupError.message);
         }
 
+        // Update metadata
         metadata.status = 'completed';
-        metadata.filePath = finalPath;
         await saveFileMetadata(fileId, metadata);
 
-        const shareLink = `${process.env.CLIENT_URL}/d/${fileId}`;
+        const shareLink = `${process.env.CLIENT_URL || 'http://localhost:3000'}/d/${fileId}`;
 
         res.json({
             success: true,
@@ -159,11 +151,9 @@ router.post('/complete', async (req, res) => {
             fileName: metadata.fileName
         });
     } catch (error) {
-        console.error('Complete error details:', error);
-        res.status(500).json({
-            error: 'Failed to complete upload',
-            details: error.message
-        });
+        console.error('Complete error:', error.message);
+        console.error('Full error:', error);
+        res.status(500).json({ error: 'Failed to complete upload', details: error.message });
     }
 });
 
