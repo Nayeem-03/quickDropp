@@ -27,7 +27,7 @@ export function DownloadPage() {
             <div className="upload-container">
                 <div className="upload-card">
                     <div className="brand">
-                        <h1 className="logo">FastShare</h1>
+                        <h1 className="logo">QuickDrop</h1>
                     </div>
                     <div className="error-message" style={{ textAlign: 'center', color: '#f56565' }}>
                         <h2>⚠️ {error}</h2>
@@ -42,7 +42,7 @@ export function DownloadPage() {
         <div className="upload-container">
             <div className="upload-card">
                 <div className="brand">
-                    <h1 className="logo">FastShare</h1>
+                    <h1 className="logo">QuickDrop</h1>
                     <p className="tagline">Ready to download 📥</p>
                 </div>
 

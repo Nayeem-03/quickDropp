@@ -79,7 +79,7 @@ export function UploadInterface() {
         <div className="upload-container">
             <div className="upload-card">
                 <div className="brand">
-                    <h1 className="logo">FastShare</h1>
+                    <h1 className="logo">QuickDrop</h1>
                     <p className="tagline">Lightning-fast file sharing ⚡</p>
                 </div>
 

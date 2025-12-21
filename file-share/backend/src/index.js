@@ -41,7 +41,7 @@ if (process.env.MONGODB_URI) {
 
 // Routes
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'FastShare API running' });
+  res.json({ status: 'ok', message: 'QuickDrop API running' });
 });
 
 app.use('/api/upload', uploadRoutes);
