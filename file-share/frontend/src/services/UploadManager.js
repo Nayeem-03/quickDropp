@@ -79,7 +79,6 @@ export class UploadManager {
             if (error.name === 'AbortError' || this.state === 'cancelled') {
                 return { success: false, cancelled: true };
             }
-            console.error('Upload error:', error);
             throw error;
         }
     }
@@ -147,5 +146,5 @@ export class UploadManager {
 
     // Pause/Resume not fully supported yet (requires persistence)
     pause() { this.cancel(); }
-    resume() { console.warn('To resume, retry the upload. It will restart.'); }
+    resume() { /* To resume, retry the upload */ }
 }

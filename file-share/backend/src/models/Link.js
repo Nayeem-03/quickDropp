@@ -66,13 +66,10 @@ linkSchema.methods.isValid = function () {
 // Cleanup S3 file when document is deleted (including TTL expiry)
 linkSchema.pre('deleteOne', { document: true, query: false }, async function () {
     try {
-        // Dynamically import to avoid circular dependency
         const { deleteFromS3 } = await import('../utils/s3.js');
-        console.log(`🧹 TTL Cleanup: Deleting S3 file for expired link ${this.linkId}`);
         await deleteFromS3(this.s3Key);
-        console.log(`✅ S3 file deleted via TTL cleanup`);
-    } catch (err) {
-        console.error('TTL cleanup error:', err.message);
+    } catch {
+        // Silent fail - cleanup is best effort
     }
 });
 

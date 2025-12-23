@@ -7,12 +7,6 @@ let BUCKET_NAME = null;
 
 function getS3Client() {
     if (!s3Client) {
-        console.log('🔧 AWS Config Check:');
-        console.log('Region:', process.env.AWS_REGION);
-        console.log('Bucket:', process.env.S3_BUCKET_NAME);
-        console.log('Access Key ID:', process.env.AWS_ACCESS_KEY_ID ? `${process.env.AWS_ACCESS_KEY_ID.substring(0, 8)}...` : 'MISSING');
-        console.log('Secret Key:', process.env.AWS_SECRET_ACCESS_KEY ? 'SET (hidden)' : 'MISSING');
-
         s3Client = new S3Client({
             region: process.env.AWS_REGION,
             credentials: {

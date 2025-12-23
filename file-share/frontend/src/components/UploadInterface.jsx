@@ -72,8 +72,7 @@ export function UploadInterface() {
 
             setFile(zipFile);
             setUploadState('ready');
-        } catch (error) {
-            console.error('Folder compression error:', error);
+        } catch {
             setUploadState('idle');
         }
     };

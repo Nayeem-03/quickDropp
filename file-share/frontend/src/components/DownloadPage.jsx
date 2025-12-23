@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { API_URL } from '../config.js';
+import { FilePreview } from './FilePreview.jsx';
 
 export function DownloadPage() {
     const { fileId } = useParams();
@@ -13,6 +14,11 @@ export function DownloadPage() {
     const [needsPassword, setNeedsPassword] = useState(false);
     const [releaseDate, setReleaseDate] = useState(null);
     const [countdown, setCountdown] = useState('');
+
+    // Preview state
+    const [showPreview, setShowPreview] = useState(false);
+    const [previewUrl, setPreviewUrl] = useState(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
 
     useEffect(() => {
         fetch(`${API_URL}/api/files/${fileId}`)
@@ -137,6 +143,55 @@ export function DownloadPage() {
         return '<1m';
     };
 
+    // Check if file type supports preview
+    const canPreview = (mimeType) => {
+        if (!mimeType) return false;
+        return mimeType.startsWith('image/') ||
+            mimeType.startsWith('video/') ||
+            mimeType.startsWith('audio/') ||
+            mimeType === 'application/pdf' ||
+            mimeType.startsWith('text/') ||
+            mimeType === 'application/json' ||
+            mimeType === 'application/javascript';
+    };
+
+    const handlePreview = async () => {
+        if (needsPassword && !password) {
+            setPasswordError('Please enter the password');
+            return;
+        }
+
+        setPreviewLoading(true);
+        setPasswordError('');
+
+        try {
+            const response = await fetch(`${API_URL}/api/files/preview/${fileId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: password || null })
+            });
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                if (response.status === 401) {
+                    setPasswordError(data.error || 'Incorrect password');
+                } else {
+                    setPasswordError(data.error || 'Preview failed');
+                }
+                setPreviewLoading(false);
+                return;
+            }
+
+            const { previewUrl } = await response.json();
+            setPreviewUrl(previewUrl);
+            setShowPreview(true);
+        } catch {
+            setPasswordError('Preview failed');
+        }
+
+        setPreviewLoading(false);
+    };
+
     return (
         <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
             <div className="w-full max-w-md">
@@ -148,12 +203,12 @@ export function DownloadPage() {
                     {error && (
                         <div className="text-center space-y-5">
                             <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center ${errorType === 'expired' ? 'bg-amber-500/10' :
-                                    errorType === 'scheduled' ? 'bg-blue-500/10' :
-                                        'bg-red-500/10'
+                                errorType === 'scheduled' ? 'bg-blue-500/10' :
+                                    'bg-red-500/10'
                                 }`}>
                                 <svg className={`w-8 h-8 ${errorType === 'expired' ? 'text-amber-400' :
-                                        errorType === 'scheduled' ? 'text-blue-400' :
-                                            'text-red-400'
+                                    errorType === 'scheduled' ? 'text-blue-400' :
+                                        'text-red-400'
                                     }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     {errorType === 'scheduled' ? (
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -223,10 +278,24 @@ export function DownloadPage() {
                                 </div>
                             )}
 
-                            <button onClick={handleDownload} disabled={downloading}
-                                className={`w-full py-3 bg-blue-600 text-white font-medium rounded-xl transition-colors ${downloading ? 'opacity-75 cursor-not-allowed' : 'hover:bg-blue-500'}`}>
-                                {downloading ? 'Downloading...' : '⬇️ Download'}
-                            </button>
+                            {/* Action Buttons */}
+                            <div className="flex gap-3">
+                                {/* Preview Button - only show for previewable types */}
+                                {canPreview(metadata.mimeType) && (
+                                    <button
+                                        onClick={handlePreview}
+                                        disabled={previewLoading}
+                                        className={`flex-1 py-3 border border-slate-700 text-slate-300 font-medium rounded-xl transition-colors ${previewLoading ? 'opacity-75 cursor-not-allowed' : 'hover:border-slate-600 hover:text-white'}`}
+                                    >
+                                        {previewLoading ? 'Loading...' : '👁️ Preview'}
+                                    </button>
+                                )}
+
+                                <button onClick={handleDownload} disabled={downloading}
+                                    className={`flex-1 py-3 bg-blue-600 text-white font-medium rounded-xl transition-colors ${downloading ? 'opacity-75 cursor-not-allowed' : 'hover:bg-blue-500'}`}>
+                                    {downloading ? 'Downloading...' : '⬇️ Download'}
+                                </button>
+                            </div>
 
                             <Link to="/" className="inline-block text-slate-500 hover:text-slate-300 transition-colors text-sm">Share your own file →</Link>
                         </div>
@@ -234,6 +303,24 @@ export function DownloadPage() {
                 </div>
                 <p className="text-center text-slate-600 text-xs mt-5">No limits • No registration</p>
             </div>
+
+            {/* File Preview Modal */}
+            {showPreview && previewUrl && (
+                <FilePreview
+                    previewUrl={previewUrl}
+                    fileName={metadata?.fileName}
+                    mimeType={metadata?.mimeType}
+                    onClose={() => {
+                        setShowPreview(false);
+                        setPreviewUrl(null);
+                    }}
+                    onDownload={() => {
+                        setShowPreview(false);
+                        setPreviewUrl(null);
+                        handleDownload();
+                    }}
+                />
+            )}
         </div>
     );
 }

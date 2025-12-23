@@ -104,7 +104,6 @@ export function ReplaceFilePage() {
 
             setUploadState('completed');
         } catch (err) {
-            console.error('Replace error:', err);
             setError(err.message);
             setUploadState('error');
         }
