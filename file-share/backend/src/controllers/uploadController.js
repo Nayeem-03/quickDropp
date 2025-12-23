@@ -89,8 +89,27 @@ export const completeUpload = async (req, res) => {
         }
 
         // Complete multipart upload if applicable
-        if (uploadId && parts) {
-            await completeMultipartUpload(link.s3Key, uploadId, parts);
+        if (uploadId && parts && parts.length > 0) {
+            try {
+                // Sort parts by PartNumber before completing
+                const sortedParts = [...parts].sort((a, b) => a.PartNumber - b.PartNumber);
+
+                // Validate all parts have ETags
+                const validParts = sortedParts.filter(p => p.ETag);
+                if (validParts.length !== sortedParts.length) {
+                    console.error('Some parts missing ETags:', sortedParts);
+                }
+
+                await completeMultipartUpload(link.s3Key, uploadId, validParts);
+            } catch (s3Error) {
+                console.error('S3 CompleteMultipartUpload error:', s3Error);
+                // If the error is that the upload doesn't exist, it might already be complete
+                if (s3Error.name === 'NoSuchUpload') {
+                    console.log('Multipart upload already completed or expired, continuing...');
+                } else {
+                    throw s3Error;
+                }
+            }
         }
 
         const shareLink = `${process.env.CLIENT_URL || 'http://localhost:3000'}/d/${link.linkId}`;
@@ -101,7 +120,8 @@ export const completeUpload = async (req, res) => {
             shareLink,
             fileName: link.originalName
         });
-    } catch {
+    } catch (error) {
+        console.error('Complete upload error:', error);
         res.status(500).json({ error: 'Failed to complete upload' });
     }
 };

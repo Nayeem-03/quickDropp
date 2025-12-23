@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { UploadManager } from '../services/UploadManager';
 
 const EXPIRY_OPTIONS = [
@@ -22,6 +22,9 @@ export function UploadInterface() {
     const [copied, setCopied] = useState(false);
     const [uploadManager] = useState(() => new UploadManager());
     const [isDragging, setIsDragging] = useState(false);
+
+    // Progress floor to prevent backward jumps during network issues
+    const progressFloorRef = useRef(0);
 
     // Resume state
     const [pendingUpload, setPendingUpload] = useState(null);
@@ -58,6 +61,7 @@ export function UploadInterface() {
                     const completedParts = pending.completedParts || [];
                     const resumeProgress = Math.round((completedParts.length / pending.totalParts) * 100);
                     setProgress(resumeProgress);
+                    progressFloorRef.current = resumeProgress; // Set floor to prevent backward jumps
 
                     // Calculate accurate bytes from completed parts
                     let completedBytes = 0;
@@ -73,7 +77,7 @@ export function UploadInterface() {
                     setUploadSpeed(0);
 
                     uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
-                        setProgress(Math.round((uploadedChunks / totalChunks) * 100));
+                        safeUpdateProgress(Math.round((uploadedChunks / totalChunks) * 100));
                         if (speed) setUploadSpeed(speed);
                         if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
                         if (totalBytes !== undefined) setTotalBytes(totalBytes);
@@ -163,6 +167,7 @@ export function UploadInterface() {
             const completedParts = pending.completedParts || [];
             const resumeProgress = Math.round((completedParts.length / pending.totalParts) * 100);
             setProgress(resumeProgress);
+            progressFloorRef.current = resumeProgress; // Set floor to prevent backward jumps
 
             // Calculate accurate bytes
             let completedBytes = 0;
@@ -174,6 +179,15 @@ export function UploadInterface() {
             setUploadedBytes(completedBytes);
             setTotalBytes(pending.fileSize);
         }
+    };
+
+    // Safe progress update that never goes backward
+    const safeUpdateProgress = (newProgress) => {
+        const clampedProgress = Math.max(newProgress, progressFloorRef.current);
+        if (clampedProgress > progressFloorRef.current) {
+            progressFloorRef.current = clampedProgress;
+        }
+        setProgress(clampedProgress);
     };
 
     const getExpiryMs = () => {
@@ -191,9 +205,10 @@ export function UploadInterface() {
         setUploadState('uploading');
         setUploadSpeed(0);
         setTotalBytes(file.size);
+        progressFloorRef.current = 0; // Reset floor for new upload
 
         uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
-            setProgress(Math.round((uploadedChunks / totalChunks) * 100));
+            safeUpdateProgress(Math.round((uploadedChunks / totalChunks) * 100));
             if (speed) setUploadSpeed(speed);
             if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
             if (totalBytes !== undefined) setTotalBytes(totalBytes);
@@ -230,7 +245,7 @@ export function UploadInterface() {
         syncUIFromLocalStorage();
 
         uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
-            setProgress(Math.round((uploadedChunks / totalChunks) * 100));
+            safeUpdateProgress(Math.round((uploadedChunks / totalChunks) * 100));
             if (speed) setUploadSpeed(speed);
             if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
             if (totalBytes !== undefined) setTotalBytes(totalBytes);
