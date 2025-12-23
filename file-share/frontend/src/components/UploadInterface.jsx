@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { UploadManager } from '../services/UploadManager';
 
 const EXPIRY_OPTIONS = [
@@ -20,6 +20,9 @@ export function UploadInterface() {
     const [uploadManager] = useState(() => new UploadManager());
     const [isDragging, setIsDragging] = useState(false);
 
+    // Resume state
+    const [pendingUpload, setPendingUpload] = useState(null);
+
     // Expiry state
     const [expiry, setExpiry] = useState('7d');
     const [showExpiryDropdown, setShowExpiryDropdown] = useState(false);
@@ -34,11 +37,30 @@ export function UploadInterface() {
     const [enableScheduledAccess, setEnableScheduledAccess] = useState(false);
     const [releaseDate, setReleaseDate] = useState('');
 
+    // Check for pending uploads on mount
+    useEffect(() => {
+        const pending = UploadManager.hasPendingUpload();
+        if (pending) {
+            setPendingUpload(pending);
+        }
+    }, []);
+
     const handleFileSelect = (e) => {
         const selectedFile = e.target.files?.[0];
         if (selectedFile) {
             setFile(selectedFile);
-            setUploadState('ready');
+            // Check if this file matches a pending upload
+            if (pendingUpload && UploadManager.fileMatchesPending(selectedFile, pendingUpload)) {
+                setUploadState('resumable');
+                // Calculate starting progress
+                const resumeProgress = Math.round(
+                    (pendingUpload.completedParts?.length / pendingUpload.totalParts) * 100
+                );
+                setProgress(resumeProgress);
+            } else {
+                setUploadState('ready');
+                setPendingUpload(null);
+            }
         }
     };
 
@@ -123,19 +145,93 @@ export function UploadInterface() {
 
     const handlePause = () => {
         uploadManager.pause();
+        // Get the current pending upload from localStorage (saved during upload)
+        const pending = UploadManager.hasPendingUpload();
+        if (pending) {
+            setPendingUpload(pending);
+        }
         setUploadState('paused');
     };
 
-    const handleResume = () => {
-        uploadManager.resume();
+    const handleResumeFromPause = async () => {
+        // Get the latest pending upload state from localStorage
+        const pending = UploadManager.hasPendingUpload();
+        if (!file || !pending) {
+            // No pending upload found, start fresh
+            setUploadState('ready');
+            return;
+        }
+
         setUploadState('uploading');
+        setPendingUpload(pending);
+
+        uploadManager.onProgress = ({ uploadedChunks, totalChunks }) => {
+            setProgress(Math.round((uploadedChunks / totalChunks) * 100));
+        };
+
+        try {
+            const result = await uploadManager.resumeUpload(file, uploadManager.onProgress);
+
+            if (result.success) {
+                setShareLink(result.shareLink);
+                setUploadState('completed');
+                setPendingUpload(null);
+            }
+        } catch {
+            // If resume fails, start fresh
+            setUploadState('ready');
+            setPendingUpload(null);
+            UploadManager.clearPendingUpload();
+        }
+    };
+
+    const handleResume = async () => {
+        if (!file) return;
+
+        // Check if we have pending upload data
+        const pending = pendingUpload || UploadManager.hasPendingUpload();
+
+        if (!pending || !UploadManager.fileMatchesPending(file, pending)) {
+            // No matching pending upload, start fresh
+            setUploadState('ready');
+            return;
+        }
+
+        setUploadState('uploading');
+
+        uploadManager.onProgress = ({ uploadedChunks, totalChunks }) => {
+            setProgress(Math.round((uploadedChunks / totalChunks) * 100));
+        };
+
+        try {
+            const result = await uploadManager.resumeUpload(file, uploadManager.onProgress);
+
+            if (result.success) {
+                setShareLink(result.shareLink);
+                setUploadState('completed');
+                setPendingUpload(null);
+            }
+        } catch {
+            // If resume fails, start fresh
+            setUploadState('ready');
+            setPendingUpload(null);
+            UploadManager.clearPendingUpload();
+        }
+    };
+
+    // Dismiss pending upload notification
+    const dismissPendingUpload = () => {
+        UploadManager.clearPendingUpload();
+        setPendingUpload(null);
     };
 
     const handleCancel = () => {
         uploadManager.cancel();
+        UploadManager.clearPendingUpload();
         setUploadState('idle');
         setProgress(0);
         setFile(null);
+        setPendingUpload(null);
     };
 
     const handleCopy = () => {
@@ -178,8 +274,40 @@ export function UploadInterface() {
                         <p className="text-slate-500 mt-1 text-sm">Fast & simple file sharing</p>
                     </div>
 
+                    {/* Pending Upload Notification */}
+                    {pendingUpload && uploadState === 'idle' && (
+                        <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+                            <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                                    <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-amber-200 font-medium text-sm">Incomplete Upload Found</p>
+                                    <p className="text-amber-200/70 text-xs mt-1 truncate">{pendingUpload.fileName}</p>
+                                    <p className="text-amber-200/50 text-xs mt-0.5">
+                                        {pendingUpload.completedParts?.length || 0} of {pendingUpload.totalParts} parts uploaded
+                                    </p>
+                                    <p className="text-amber-200/70 text-xs mt-2">
+                                        Select the same file to resume uploading
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={dismissPendingUpload}
+                                    className="text-amber-400 hover:text-amber-300 p-1"
+                                    title="Dismiss"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Upload Zone */}
-                    {(uploadState === 'idle' || uploadState === 'ready') && (
+                    {(uploadState === 'idle' || uploadState === 'ready' || uploadState === 'resumable') && (
                         <>
                             <div
                                 className={`relative border-2 border-dashed rounded-xl p-8 transition-colors
@@ -385,6 +513,43 @@ export function UploadInterface() {
                         </button>
                     )}
 
+                    {/* Resume Upload Button */}
+                    {file && uploadState === 'resumable' && (
+                        <div className="mt-5 space-y-3">
+                            {/* Resume Progress Bar */}
+                            <div className="space-y-2">
+                                <div className="flex justify-between text-sm">
+                                    <span className="text-slate-400">Previous progress</span>
+                                    <span className="text-green-400">{progress}%</span>
+                                </div>
+                                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-green-500 transition-all duration-300"
+                                        style={{ width: `${progress}%` }}
+                                    />
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleResume}
+                                className="w-full py-3 bg-green-600 hover:bg-green-500 text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                Resume Upload
+                            </button>
+                            <button
+                                onClick={() => {
+                                    dismissPendingUpload();
+                                    setUploadState('ready');
+                                }}
+                                className="w-full py-2 text-slate-400 hover:text-white text-sm transition-colors"
+                            >
+                                Start fresh instead
+                            </button>
+                        </div>
+                    )}
+
                     {/* Progress Section */}
                     {(uploadState === 'uploading' || uploadState === 'paused') && (
                         <div className="space-y-5">
@@ -409,7 +574,7 @@ export function UploadInterface() {
                                         Pause
                                     </button>
                                 ) : (
-                                    <button onClick={handleResume} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors">
+                                    <button onClick={handleResumeFromPause} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors">
                                         Resume
                                     </button>
                                 )}
