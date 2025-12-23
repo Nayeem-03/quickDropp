@@ -83,17 +83,24 @@ export function UploadInterface() {
         };
     }, [uploadState, file, uploadManager]);
 
+    const checkPendingResume = (file) => {
+        const pending = UploadManager.hasPendingUpload();
+        if (pending && UploadManager.fileMatchesPending(file, pending)) {
+            setPendingUpload(pending); // Ensure state is synced
+            setUploadState('resumable');
+            const resumeProgress = Math.round((pending.completedParts?.length / pending.totalParts) * 100);
+            setProgress(resumeProgress);
+            return true;
+        }
+        return false;
+    };
+
     const handleFileSelect = (e) => {
         const selectedFile = e.target.files?.[0];
         if (selectedFile) {
             setFile(selectedFile);
-            if (pendingUpload && UploadManager.fileMatchesPending(selectedFile, pendingUpload)) {
-                setUploadState('resumable');
-                const resumeProgress = Math.round((pendingUpload.completedParts?.length / pendingUpload.totalParts) * 100);
-                setProgress(resumeProgress);
-            } else {
+            if (!checkPendingResume(selectedFile)) {
                 setUploadState('ready');
-                setPendingUpload(null);
             }
         }
     };
@@ -125,7 +132,9 @@ export function UploadInterface() {
         const droppedFile = e.dataTransfer.files[0];
         if (droppedFile) {
             setFile(droppedFile);
-            setUploadState('ready');
+            if (!checkPendingResume(droppedFile)) {
+                setUploadState('ready');
+            }
         }
     };
 
