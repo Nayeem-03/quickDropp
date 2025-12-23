@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { API_URL } from '../config.js';
-import { FilePreview } from './FilePreview.jsx';
 
 export function DownloadPage() {
     const { fileId } = useParams();
@@ -14,9 +13,6 @@ export function DownloadPage() {
     const [needsPassword, setNeedsPassword] = useState(false);
     const [releaseDate, setReleaseDate] = useState(null);
     const [countdown, setCountdown] = useState('');
-    const [showPreview, setShowPreview] = useState(false);
-    const [previewUrl, setPreviewUrl] = useState(null);
-    const [loadingPreview, setLoadingPreview] = useState(false);
 
     useEffect(() => {
         fetch(`${API_URL}/api/files/${fileId}`)
@@ -55,7 +51,6 @@ export function DownloadPage() {
 
             if (diff <= 0) {
                 setCountdown('Available now!');
-                // Reload to fetch metadata
                 window.location.reload();
                 return;
             }
@@ -91,34 +86,6 @@ export function DownloadPage() {
         setPasswordError('');
 
         try {
-            // Check if file type supports preview
-            const isPreviewable = metadata?.mimeType && (
-                metadata.mimeType.startsWith('image/') ||
-                metadata.mimeType.startsWith('video/') ||
-                metadata.mimeType.startsWith('audio/') ||
-                metadata.mimeType === 'application/pdf' ||
-                metadata.mimeType.startsWith('text/') ||
-                ['application/json', 'application/javascript'].includes(metadata.mimeType)
-            );
-
-            // If previewable, show preview first
-            if (isPreviewable) {
-                const previewResponse = await fetch(`${API_URL}/api/files/preview/${fileId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password: password || null })
-                });
-
-                if (previewResponse.ok) {
-                    const { previewUrl: url } = await previewResponse.json();
-                    setPreviewUrl(url);
-                    setShowPreview(true);
-                    setDownloading(false);
-                    return; // Don't download yet, let user close preview first
-                }
-            }
-
-            // For non-previewable files or if preview fails, proceed with download
             const response = await fetch(`${API_URL}/api/files/download/${fileId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -147,39 +114,6 @@ export function DownloadPage() {
         }
 
         setTimeout(() => setDownloading(false), 2000);
-    };
-
-    const handlePreview = async () => {
-        if (needsPassword && !password) {
-            setPasswordError('Please enter the password');
-            return;
-        }
-
-        setLoadingPreview(true);
-        setPasswordError('');
-
-        try {
-            const response = await fetch(`${API_URL}/api/files/preview/${fileId}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: password || null })
-            });
-
-            if (!response.ok) {
-                const data = await response.json().catch(() => ({}));
-                setPasswordError(response.status === 401 ? (data.error || 'Incorrect password') : (data.error || 'Preview failed'));
-                setLoadingPreview(false);
-                return;
-            }
-
-            const { previewUrl: url } = await response.json();
-            setPreviewUrl(url);
-            setShowPreview(true);
-        } catch {
-            setPasswordError('Preview failed');
-        }
-
-        setLoadingPreview(false);
     };
 
     const formatFileSize = (bytes) => {
@@ -214,12 +148,12 @@ export function DownloadPage() {
                     {error && (
                         <div className="text-center space-y-5">
                             <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center ${errorType === 'expired' ? 'bg-amber-500/10' :
-                                errorType === 'scheduled' ? 'bg-blue-500/10' :
-                                    'bg-red-500/10'
+                                    errorType === 'scheduled' ? 'bg-blue-500/10' :
+                                        'bg-red-500/10'
                                 }`}>
                                 <svg className={`w-8 h-8 ${errorType === 'expired' ? 'text-amber-400' :
-                                    errorType === 'scheduled' ? 'text-blue-400' :
-                                        'text-red-400'
+                                        errorType === 'scheduled' ? 'text-blue-400' :
+                                            'text-red-400'
                                     }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     {errorType === 'scheduled' ? (
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -289,12 +223,9 @@ export function DownloadPage() {
                                 </div>
                             )}
 
-                            <button
-                                onClick={handleDownload}
-                                disabled={downloading}
-                                className={`w-full py-3 bg-blue-600 text-white font-medium rounded-xl transition-colors ${downloading ? 'opacity-75 cursor-not-allowed' : 'hover:bg-blue-500'}`}
-                            >
-                                {downloading ? 'Loading...' : '⬇️ Download'}
+                            <button onClick={handleDownload} disabled={downloading}
+                                className={`w-full py-3 bg-blue-600 text-white font-medium rounded-xl transition-colors ${downloading ? 'opacity-75 cursor-not-allowed' : 'hover:bg-blue-500'}`}>
+                                {downloading ? 'Downloading...' : '⬇️ Download'}
                             </button>
 
                             <Link to="/" className="inline-block text-slate-500 hover:text-slate-300 transition-colors text-sm">Share your own file →</Link>
@@ -303,16 +234,6 @@ export function DownloadPage() {
                 </div>
                 <p className="text-center text-slate-600 text-xs mt-5">No limits • No registration</p>
             </div>
-
-            {/* Preview Modal */}
-            {showPreview && previewUrl && metadata && (
-                <FilePreview
-                    previewUrl={previewUrl}
-                    fileName={metadata.fileName}
-                    mimeType={metadata.mimeType}
-                    onClose={() => setShowPreview(false)}
-                />
-            )}
         </div>
     );
 }

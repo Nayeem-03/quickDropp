@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export function FilePreview({ previewUrl, fileName, mimeType, onClose }) {
+export function FilePreview({ previewUrl, fileName, mimeType, onClose, onDownload }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -121,6 +121,22 @@ export function FilePreview({ previewUrl, fileName, mimeType, onClose }) {
                             <p className="text-slate-600 text-sm mt-2">Download the file to view it</p>
                         </div>
                     )}
+                </div>
+
+                {/* Footer with Download Button */}
+                <div className="flex items-center justify-end gap-3 p-4 border-t border-slate-800">
+                    <button
+                        onClick={onClose}
+                        className="px-5 py-2 text-slate-400 hover:text-white transition-colors"
+                    >
+                        Cancel
+                    </button>
+                    <button
+                        onClick={onDownload}
+                        className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors"
+                    >
+                        ⬇️ Confirm Download
+                    </button>
                 </div>
             </div>
         </div>
