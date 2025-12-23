@@ -2,7 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import Link from '../models/Link.js';
 import { getPresignedUploadUrl, initMultipartUpload, getPresignedPartUrl, deleteFromS3 } from '../utils/s3.js';
 
-const CHUNK_SIZE = 100 * 1024 * 1024; // 100MB per part for multipart
+const CHUNK_SIZE = 25 * 1024 * 1024; // 25MB per part for optimal large file uploads
+const MULTIPART_THRESHOLD = 10 * 1024 * 1024; // Use multipart for files > 10MB
 
 // Replace file content (mutable link)
 export const replaceFile = async (req, res) => {
@@ -26,7 +27,7 @@ export const replaceFile = async (req, res) => {
         const newS3Key = uuidv4();
 
         // Determine if we need multipart upload
-        const useMultipart = fileSize > CHUNK_SIZE;
+        const useMultipart = fileSize > MULTIPART_THRESHOLD;
         let uploadData = {};
 
         if (useMultipart) {

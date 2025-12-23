@@ -15,6 +15,9 @@ export function UploadInterface() {
     const [file, setFile] = useState(null);
     const [uploadState, setUploadState] = useState('idle');
     const [progress, setProgress] = useState(0);
+    const [uploadSpeed, setUploadSpeed] = useState(0); // bytes per second
+    const [uploadedBytes, setUploadedBytes] = useState(0);
+    const [totalBytes, setTotalBytes] = useState(0);
     const [shareLink, setShareLink] = useState('');
     const [copied, setCopied] = useState(false);
     const [uploadManager] = useState(() => new UploadManager());
@@ -37,6 +40,7 @@ export function UploadInterface() {
     const [enableScheduledAccess, setEnableScheduledAccess] = useState(false);
     const [releaseDate, setReleaseDate] = useState('');
 
+
     // Check for pending uploads on mount
     useEffect(() => {
         const pending = UploadManager.hasPendingUpload();
@@ -44,6 +48,57 @@ export function UploadInterface() {
             setPendingUpload(pending);
         }
     }, []);
+
+    // Network status detection for auto-pause/resume
+    useEffect(() => {
+        const handleOffline = () => {
+            if (uploadState === 'uploading') {
+                // Network lost - pause the upload
+                uploadManager.pause();
+                setUploadState('paused');
+            }
+        };
+
+        const handleOnline = () => {
+            if (uploadState === 'paused' && file) {
+                // Network restored - auto resume
+                const pending = UploadManager.hasPendingUpload();
+                if (pending && UploadManager.fileMatchesPending(file, pending)) {
+                    // Resume upload
+                    setUploadState('uploading');
+                    setUploadSpeed(0);
+
+                    uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
+                        setProgress(Math.round((uploadedChunks / totalChunks) * 100));
+                        if (speed) setUploadSpeed(speed);
+                        if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
+                        if (totalBytes !== undefined) setTotalBytes(totalBytes);
+                    };
+
+                    uploadManager.resumeUpload(file, uploadManager.onProgress)
+                        .then(result => {
+                            if (result.success) {
+                                setShareLink(result.shareLink);
+                                setUploadState('completed');
+                                setPendingUpload(null);
+                            }
+                        })
+                        .catch(() => {
+                            // Stay paused if resume fails, will retry on next online event
+                            setUploadState('paused');
+                        });
+                }
+            }
+        };
+
+        window.addEventListener('offline', handleOffline);
+        window.addEventListener('online', handleOnline);
+
+        return () => {
+            window.removeEventListener('offline', handleOffline);
+            window.removeEventListener('online', handleOnline);
+        };
+    }, [uploadState, file, uploadManager]);
 
     const handleFileSelect = (e) => {
         const selectedFile = e.target.files?.[0];
@@ -125,9 +180,13 @@ export function UploadInterface() {
         if (!file) return;
 
         setUploadState('uploading');
+        setUploadSpeed(0);
 
-        uploadManager.onProgress = ({ uploadedChunks, totalChunks }) => {
+        uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
             setProgress(Math.round((uploadedChunks / totalChunks) * 100));
+            if (speed) setUploadSpeed(speed);
+            if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
+            if (totalBytes !== undefined) setTotalBytes(totalBytes);
         };
 
         const result = await uploadManager.uploadFile(file, {
@@ -143,47 +202,9 @@ export function UploadInterface() {
         }
     };
 
-    const handlePause = () => {
-        uploadManager.pause();
-        // Get the current pending upload from localStorage (saved during upload)
-        const pending = UploadManager.hasPendingUpload();
-        if (pending) {
-            setPendingUpload(pending);
-        }
-        setUploadState('paused');
-    };
 
-    const handleResumeFromPause = async () => {
-        // Get the latest pending upload state from localStorage
-        const pending = UploadManager.hasPendingUpload();
-        if (!file || !pending) {
-            // No pending upload found, start fresh
-            setUploadState('ready');
-            return;
-        }
 
-        setUploadState('uploading');
-        setPendingUpload(pending);
 
-        uploadManager.onProgress = ({ uploadedChunks, totalChunks }) => {
-            setProgress(Math.round((uploadedChunks / totalChunks) * 100));
-        };
-
-        try {
-            const result = await uploadManager.resumeUpload(file, uploadManager.onProgress);
-
-            if (result.success) {
-                setShareLink(result.shareLink);
-                setUploadState('completed');
-                setPendingUpload(null);
-            }
-        } catch {
-            // If resume fails, start fresh
-            setUploadState('ready');
-            setPendingUpload(null);
-            UploadManager.clearPendingUpload();
-        }
-    };
 
     const handleResume = async () => {
         if (!file) return;
@@ -198,9 +219,13 @@ export function UploadInterface() {
         }
 
         setUploadState('uploading');
+        setUploadSpeed(0);
 
-        uploadManager.onProgress = ({ uploadedChunks, totalChunks }) => {
+        uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
             setProgress(Math.round((uploadedChunks / totalChunks) * 100));
+            if (speed) setUploadSpeed(speed);
+            if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
+            if (totalBytes !== undefined) setTotalBytes(totalBytes);
         };
 
         try {
@@ -246,6 +271,15 @@ export function UploadInterface() {
         const sizes = ['B', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+    };
+
+    const formatSpeed = (bytesPerSecond) => {
+        if (!bytesPerSecond || bytesPerSecond === 0) return '0 KB/s';
+        const k = 1024;
+        if (bytesPerSecond < k) return bytesPerSecond.toFixed(0) + ' B/s';
+        if (bytesPerSecond < k * k) return (bytesPerSecond / k).toFixed(1) + ' KB/s';
+        if (bytesPerSecond < k * k * k) return (bytesPerSecond / (k * k)).toFixed(1) + ' MB/s';
+        return (bytesPerSecond / (k * k * k)).toFixed(2) + ' GB/s';
     };
 
     const resetUpload = () => {
@@ -566,19 +600,27 @@ export function UploadInterface() {
                                     style={{ width: `${progress}%` }}
                                 />
                             </div>
-                            <p className="text-center text-slate-400 text-sm">{progress}%</p>
 
+                            {/* Progress and Speed Display */}
+                            <div className="flex justify-between items-center text-sm">
+                                <div className="text-slate-400">
+                                    <span className="font-medium text-slate-300">{progress}%</span>
+                                    <span className="mx-2 text-slate-600">•</span>
+                                    <span>{formatFileSize(uploadedBytes)} of {formatFileSize(totalBytes)}</span>
+                                </div>
+                                <div className="text-emerald-400 font-medium">
+                                    ⚡ {formatSpeed(uploadSpeed)}
+                                </div>
+                            </div>
+
+                            {/* Cancel button only - pause/resume is automatic based on network */}
                             <div className="flex gap-3">
-                                {uploadState === 'uploading' ? (
-                                    <button onClick={handlePause} className="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-xl transition-colors">
-                                        Pause
-                                    </button>
-                                ) : (
-                                    <button onClick={handleResumeFromPause} className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors">
-                                        Resume
-                                    </button>
+                                {uploadState === 'paused' && (
+                                    <div className="flex-1 py-2.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 font-medium rounded-xl text-center text-sm">
+                                        ⏸️ Waiting for connection...
+                                    </div>
                                 )}
-                                <button onClick={handleCancel} className="flex-1 py-2.5 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 font-medium rounded-xl transition-colors">
+                                <button onClick={handleCancel} className={`${uploadState === 'paused' ? 'flex-1' : 'w-full'} py-2.5 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 font-medium rounded-xl transition-colors`}>
                                     Cancel
                                 </button>
                             </div>

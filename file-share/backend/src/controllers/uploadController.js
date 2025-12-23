@@ -3,7 +3,8 @@ import bcrypt from 'bcryptjs';
 import Link from '../models/Link.js';
 import { getPresignedUploadUrl, initMultipartUpload, getPresignedPartUrl, completeMultipartUpload } from '../utils/s3.js';
 
-const CHUNK_SIZE = 100 * 1024 * 1024; // 100MB per part for multipart
+const CHUNK_SIZE = 25 * 1024 * 1024; // 25MB per part for optimal large file uploads
+const MULTIPART_THRESHOLD = 10 * 1024 * 1024; // Use multipart for files > 10MB
 
 // Initialize upload - returns presigned URL(s) for direct S3 upload
 export const initUpload = async (req, res) => {
@@ -24,8 +25,8 @@ export const initUpload = async (req, res) => {
             passwordHash = await bcrypt.hash(password, 10);
         }
 
-        // Determine if we need multipart upload (for files > 100MB)
-        const useMultipart = fileSize > CHUNK_SIZE;
+        // Determine if we need multipart upload (for files > 10MB)
+        const useMultipart = fileSize > MULTIPART_THRESHOLD;
         let uploadData = {};
 
         if (useMultipart) {

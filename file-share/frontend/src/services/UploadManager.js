@@ -1,6 +1,7 @@
 import { API_URL } from '../config.js';
 
 const STORAGE_KEY = 'quickdrop_pending_upload';
+const CONCURRENT_UPLOADS = 8; // Maximum parallel uploads for speed
 
 // Generate a unique fingerprint for a file
 const getFileFingerprint = (file) => {
@@ -14,6 +15,11 @@ export class UploadManager {
         this.abortController = null;
         this.fileId = null;
         this.pendingUpload = null;
+        // Speed tracking
+        this.uploadStartTime = null;
+        this.bytesUploaded = 0;
+        this.lastSpeedUpdate = null;
+        this.lastBytesForSpeed = 0;
     }
 
     reset() {
@@ -21,6 +27,10 @@ export class UploadManager {
         this.abortController = null;
         this.fileId = null;
         this.pendingUpload = null;
+        this.uploadStartTime = null;
+        this.bytesUploaded = 0;
+        this.lastSpeedUpdate = null;
+        this.lastBytesForSpeed = 0;
     }
 
     // Check if there's a pending upload that can be resumed
@@ -242,14 +252,32 @@ export class UploadManager {
             // Store xhr for potential abort
             this.currentXhr = xhr;
 
+            // Speed tracking
+            let lastLoaded = 0;
+            let lastTime = Date.now();
+            this.uploadStartTime = Date.now();
+
             xhr.upload.onprogress = (event) => {
                 if (event.lengthComputable) {
                     const percentComplete = Math.round((event.loaded / event.total) * 100);
+
+                    // Calculate speed
+                    const now = Date.now();
+                    const timeDiff = (now - lastTime) / 1000; // seconds
+                    const bytesDiff = event.loaded - lastLoaded;
+                    const currentSpeed = timeDiff > 0.5 ? bytesDiff / timeDiff : 0; // Update every 500ms
+
+                    if (timeDiff > 0.5) {
+                        lastLoaded = event.loaded;
+                        lastTime = now;
+                    }
+
                     this.onProgress?.({
                         uploadedChunks: percentComplete,
                         totalChunks: 100,
-                        loaded: event.loaded,
-                        total: event.total
+                        bytesUploaded: event.loaded,
+                        totalBytes: event.total,
+                        speed: currentSpeed
                     });
                 }
             };
@@ -279,87 +307,222 @@ export class UploadManager {
         });
     }
 
+    // Parallel upload helper with real-time progress tracking
+    uploadChunkWithXHR(file, partNumber, url, chunkSize, onChunkProgress) {
+        return new Promise((resolve, reject) => {
+            const start = (partNumber - 1) * chunkSize;
+            const end = Math.min(start + chunkSize, file.size);
+            const chunk = file.slice(start, end);
+            const chunkActualSize = end - start;
+
+            const xhr = new XMLHttpRequest();
+
+            xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable && onChunkProgress) {
+                    onChunkProgress(partNumber, event.loaded, chunkActualSize);
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    const etag = xhr.getResponseHeader('ETag');
+                    resolve({ PartNumber: partNumber, ETag: etag });
+                } else {
+                    reject(new Error(`Upload failed with status ${xhr.status}`));
+                }
+            };
+
+            xhr.onerror = () => reject(new Error('Chunk upload failed'));
+            xhr.onabort = () => reject(new Error('Chunk upload aborted'));
+
+            xhr.open('PUT', url);
+            xhr.send(chunk);
+        });
+    }
+
     async uploadMultipart(file, partUrls, chunkSize) {
         const parts = [];
         const totalParts = partUrls.length;
+        let completedCount = 0;
 
-        for (let i = 0; i < partUrls.length; i++) {
+        // Initialize speed tracking
+        this.uploadStartTime = Date.now();
+        this.bytesUploaded = 0; // Base bytes from completed batches
+        this.lastSpeedUpdate = Date.now();
+        this.lastBytesForSpeed = 0;
+
+        // Track progress of current batch
+        const batchProgress = new Map();
+
+        // Process chunks in batches of CONCURRENT_UPLOADS
+        for (let i = 0; i < partUrls.length; i += CONCURRENT_UPLOADS) {
             if (this.state === 'cancelled' || this.state === 'paused') break;
 
-            const { partNumber, url } = partUrls[i];
-            const start = (partNumber - 1) * chunkSize;
-            const end = Math.min(start + chunkSize, file.size);
-            const chunk = file.slice(start, end);
+            // Get the next batch of chunks to upload
+            const batch = partUrls.slice(i, i + CONCURRENT_UPLOADS);
+            batchProgress.clear();
 
-            const response = await this.fetchWithRetry(url, {
-                method: 'PUT',
-                body: chunk,
-                signal: this.abortController.signal
-            });
+            // Callback to aggregate progress from all chunks in this batch
+            const onBatchChunkProgress = (partNumber, loaded) => {
+                batchProgress.set(partNumber, loaded);
 
-            // Get ETag from response for completing multipart
-            const etag = response.headers.get('ETag');
-            parts.push({ PartNumber: partNumber, ETag: etag });
+                // Calculate total uploaded so far (base + current batch sum)
+                let currentBatchTotal = 0;
+                for (const loadedBytes of batchProgress.values()) {
+                    currentBatchTotal += loadedBytes;
+                }
 
-            // Save progress after each successful part
-            this.updateCompletedParts(parts);
+                const totalUploaded = this.bytesUploaded + currentBatchTotal;
 
-            this.onProgress?.({ uploadedChunks: i + 1, totalChunks: totalParts });
+                // Calculate speed every 500ms
+                const now = Date.now();
+                const timeDiff = (now - this.lastSpeedUpdate) / 1000;
+
+                if (timeDiff > 0.5) {
+                    const bytesDiff = totalUploaded - this.lastBytesForSpeed;
+                    const currentSpeed = bytesDiff / timeDiff;
+
+                    this.lastSpeedUpdate = now;
+                    this.lastBytesForSpeed = totalUploaded;
+
+                    // Estimate total completed chunks based on bytes
+                    const estimatedChunks = completedCount + (currentBatchTotal / chunkSize);
+
+                    this.onProgress?.({
+                        uploadedChunks: estimatedChunks,
+                        totalChunks: totalParts,
+                        bytesUploaded: totalUploaded,
+                        totalBytes: file.size,
+                        speed: currentSpeed
+                    });
+                }
+            };
+
+            // Upload batch in parallel
+            const batchPromises = batch.map(({ partNumber, url }) =>
+                this.uploadChunkWithXHR(file, partNumber, url, chunkSize, onBatchChunkProgress)
+            );
+
+            try {
+                const batchResults = await Promise.all(batchPromises);
+                parts.push(...batchResults);
+                completedCount += batchResults.length;
+
+                // Update base bytesUploaded with this completed batch
+                // We calculate exact size to be accurate
+                const batchBytes = batch.reduce((acc, _, idx) => {
+                    // Calculate exact size of this chunk (might be smaller for last chunk)
+                    const partNum = batch[idx].partNumber;
+                    const start = (partNum - 1) * chunkSize;
+                    const end = Math.min(start + chunkSize, file.size);
+                    return acc + (end - start);
+                }, 0);
+
+                this.bytesUploaded += batchBytes;
+                this.lastBytesForSpeed = this.bytesUploaded; // Resync for next batch
+                this.lastSpeedUpdate = Date.now(); // Reset timer
+
+                // Save progress after each batch
+                this.updateCompletedParts(parts);
+
+            } catch (error) {
+                if (this.state === 'cancelled' || this.state === 'paused') break;
+                throw error;
+            }
         }
 
         return parts;
     }
 
-    // Resume version of multipart upload (starts from offset)
+    // Resume version of multipart upload (starts from offset) - with parallel uploads
     async uploadMultipartResume(file, remainingPartUrls, chunkSize, completedCount, totalParts) {
         const parts = [];
+        let newCompletedCount = 0;
 
-        for (let i = 0; i < remainingPartUrls.length; i++) {
+        // Initialize speed tracking
+        this.uploadStartTime = Date.now();
+        this.bytesUploaded = completedCount * chunkSize; // Account for already uploaded
+        this.lastSpeedUpdate = Date.now();
+        this.lastBytesForSpeed = this.bytesUploaded;
+
+        // Track progress of current batch
+        const batchProgress = new Map();
+
+        // Process remaining chunks in batches
+        for (let i = 0; i < remainingPartUrls.length; i += CONCURRENT_UPLOADS) {
             if (this.state === 'cancelled' || this.state === 'paused') break;
 
-            const { partNumber, url } = remainingPartUrls[i];
-            const start = (partNumber - 1) * chunkSize;
-            const end = Math.min(start + chunkSize, file.size);
-            const chunk = file.slice(start, end);
+            const batch = remainingPartUrls.slice(i, i + CONCURRENT_UPLOADS);
+            batchProgress.clear();
 
-            const response = await this.fetchWithRetry(url, {
-                method: 'PUT',
-                body: chunk,
-                signal: this.abortController.signal
-            });
+            // Callback to aggregate progress
+            const onBatchChunkProgress = (partNumber, loaded) => {
+                batchProgress.set(partNumber, loaded);
 
-            const etag = response.headers.get('ETag');
-            parts.push({ PartNumber: partNumber, ETag: etag });
+                let currentBatchTotal = 0;
+                for (const loadedBytes of batchProgress.values()) {
+                    currentBatchTotal += loadedBytes;
+                }
 
-            // Update storage with new completed parts
-            const pending = UploadManager.hasPendingUpload();
-            if (pending) {
-                const allParts = [...(pending.completedParts || []), ...parts];
-                this.updateCompletedParts(allParts);
+                const totalUploaded = this.bytesUploaded + currentBatchTotal;
+
+                const now = Date.now();
+                const timeDiff = (now - this.lastSpeedUpdate) / 1000;
+
+                if (timeDiff > 0.5) {
+                    const bytesDiff = totalUploaded - this.lastBytesForSpeed;
+                    const currentSpeed = bytesDiff / timeDiff;
+
+                    this.lastSpeedUpdate = now;
+                    this.lastBytesForSpeed = totalUploaded;
+
+                    const estimatedChunks = completedCount + newCompletedCount + (currentBatchTotal / chunkSize);
+
+                    this.onProgress?.({
+                        uploadedChunks: estimatedChunks,
+                        totalChunks: totalParts,
+                        bytesUploaded: totalUploaded,
+                        totalBytes: file.size,
+                        speed: currentSpeed
+                    });
+                }
+            };
+
+            const batchPromises = batch.map(({ partNumber, url }) =>
+                this.uploadChunkWithXHR(file, partNumber, url, chunkSize, onBatchChunkProgress)
+            );
+
+            try {
+                const batchResults = await Promise.all(batchPromises);
+                parts.push(...batchResults);
+                newCompletedCount += batchResults.length;
+
+                // Update base bytes with this completed batch
+                const batchBytes = batch.reduce((acc, _, idx) => {
+                    const partNum = batch[idx].partNumber;
+                    const start = (partNum - 1) * chunkSize;
+                    const end = Math.min(start + chunkSize, file.size);
+                    return acc + (end - start);
+                }, 0);
+
+                this.bytesUploaded += batchBytes;
+                this.lastBytesForSpeed = this.bytesUploaded;
+                this.lastSpeedUpdate = Date.now();
+
+                // Update storage with new completed parts
+                const pending = UploadManager.hasPendingUpload();
+                if (pending) {
+                    const allParts = [...(pending.completedParts || []), ...parts];
+                    this.updateCompletedParts(allParts);
+                }
+
+            } catch (error) {
+                if (this.state === 'cancelled' || this.state === 'paused') break;
+                throw error;
             }
-
-            this.onProgress?.({
-                uploadedChunks: completedCount + i + 1,
-                totalChunks: totalParts
-            });
         }
 
         return parts;
-    }
-
-    // Helper for retries
-    async fetchWithRetry(url, options, retries = 3) {
-        for (let i = 0; i < retries; i++) {
-            try {
-                const response = await fetch(url, options);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                return response;
-            } catch (err) {
-                if (i === retries - 1 || options.signal?.aborted) throw err;
-                // Exponential backoff: 1s, 2s, 4s
-                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i)));
-            }
-        }
     }
 
     cancel() {
@@ -373,9 +536,5 @@ export class UploadManager {
         this.state = 'paused';
         this.abortController?.abort();
         this.currentXhr?.abort();
-    }
-
-    resume() {
-        // Resume is now handled by resumeUpload method
     }
 }
