@@ -30,11 +30,51 @@ export function UploadInterface() {
     const [enablePassword, setEnablePassword] = useState(false);
     const [password, setPassword] = useState('');
 
+    // Scheduled Access state
+    const [enableScheduledAccess, setEnableScheduledAccess] = useState(false);
+    const [releaseDate, setReleaseDate] = useState('');
+
     const handleFileSelect = (e) => {
         const selectedFile = e.target.files?.[0];
         if (selectedFile) {
             setFile(selectedFile);
             setUploadState('ready');
+        }
+    };
+
+    const handleFolderSelect = async (e) => {
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+
+        setUploadState('compressing');
+
+        try {
+            // Dynamically import JSZip
+            const JSZip = (await import('jszip')).default;
+            const zip = new JSZip();
+
+            // Add all files to zip maintaining folder structure
+            for (const file of files) {
+                const path = file.webkitRelativePath || file.name;
+                zip.file(path, file);
+            }
+
+            // Generate ZIP file
+            const zipBlob = await zip.generateAsync({
+                type: 'blob',
+                compression: 'DEFLATE',
+                compressionOptions: { level: 6 }
+            });
+
+            // Get folder name from first file's path
+            const folderName = files[0].webkitRelativePath.split('/')[0];
+            const zipFile = new File([zipBlob], `${folderName}.zip`, { type: 'application/zip' });
+
+            setFile(zipFile);
+            setUploadState('ready');
+        } catch (error) {
+            console.error('Folder compression error:', error);
+            setUploadState('idle');
         }
     };
 
@@ -72,7 +112,8 @@ export function UploadInterface() {
         const result = await uploadManager.uploadFile(file, {
             expiryMs: getExpiryMs(),
             selfDestruct: expiry === 'self-destruct',
-            password: enablePassword && password ? password : null
+            password: enablePassword && password ? password : null,
+            releaseDate: enableScheduledAccess && releaseDate ? new Date(releaseDate).toISOString() : null
         });
 
         if (result.success) {
@@ -148,12 +189,6 @@ export function UploadInterface() {
                                 onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                                 onDragLeave={() => setIsDragging(false)}
                             >
-                                <input
-                                    type="file"
-                                    id="file-input"
-                                    onChange={handleFileSelect}
-                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                />
 
                                 {file ? (
                                     <div className="text-center">
@@ -166,14 +201,48 @@ export function UploadInterface() {
                                         <p className="text-slate-500 text-sm mt-1">{formatFileSize(file.size)}</p>
                                     </div>
                                 ) : (
-                                    <div className="text-center">
-                                        <div className="w-14 h-14 mx-auto mb-3 bg-slate-800 rounded-xl flex items-center justify-center">
-                                            <svg className="w-7 h-7 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <div className="text-center space-y-6">
+                                        <div className="w-20 h-20 mx-auto bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20">
+                                            <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                                             </svg>
                                         </div>
-                                        <p className="text-slate-300 font-medium">Drop your file here</p>
-                                        <p className="text-slate-500 text-sm mt-1">or click to browse</p>
+
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-white mb-2">Drop your file here</h2>
+                                            <p className="text-slate-400">or click to browse</p>
+                                        </div>
+
+                                        <div className="flex gap-3 justify-center">
+                                            <button
+                                                onClick={() => document.getElementById('file-input-btn').click()}
+                                                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-all hover:scale-105"
+                                            >
+                                                📄 Choose File
+                                            </button>
+                                            <button
+                                                onClick={() => document.getElementById('folder-input').click()}
+                                                className="px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-xl transition-all hover:scale-105"
+                                            >
+                                                📁 Choose Folder
+                                            </button>
+                                        </div>
+
+                                        <input
+                                            id="file-input-btn"
+                                            type="file"
+                                            onChange={handleFileSelect}
+                                            className="hidden"
+                                        />
+                                        <input
+                                            id="folder-input"
+                                            type="file"
+                                            webkitdirectory=""
+                                            directory=""
+                                            multiple
+                                            onChange={handleFolderSelect}
+                                            className="hidden"
+                                        />
                                     </div>
                                 )}
                             </div>
@@ -275,6 +344,31 @@ export function UploadInterface() {
                                             />
                                         )}
                                     </div>
+
+                                    {/* Scheduled Access */}
+                                    <div>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <label className="text-slate-400 text-sm">Scheduled access</label>
+                                            <button
+                                                onClick={() => setEnableScheduledAccess(!enableScheduledAccess)}
+                                                className={`w-10 h-6 rounded-full transition-colors relative ${enableScheduledAccess ? 'bg-blue-600' : 'bg-slate-700'}`}
+                                            >
+                                                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${enableScheduledAccess ? 'left-5' : 'left-1'}`} />
+                                            </button>
+                                        </div>
+                                        {enableScheduledAccess && (
+                                            <div>
+                                                <input
+                                                    type="datetime-local"
+                                                    value={releaseDate}
+                                                    onChange={(e) => setReleaseDate(e.target.value)}
+                                                    min={new Date().toISOString().slice(0, 16)}
+                                                    className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none focus:border-blue-500 transition-colors"
+                                                />
+                                                <p className="text-xs text-slate-500 mt-2">File will be accessible after this date/time</p>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             )}
                         </>
@@ -356,6 +450,13 @@ export function UploadInterface() {
                                     {copied ? 'Copied!' : 'Copy'}
                                 </button>
                             </div>
+
+                            <button
+                                onClick={() => window.location.href = `/analytics/${uploadManager.fileId}`}
+                                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors"
+                            >
+                                📊 View Analytics
+                            </button>
 
                             <button
                                 onClick={resetUpload}

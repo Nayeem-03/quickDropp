@@ -29,7 +29,8 @@ export class UploadManager {
                     mimeType: file.type || 'application/octet-stream',
                     expiryMs: options.expiryMs || 0,
                     selfDestruct: options.selfDestruct || false,
-                    password: options.password || null
+                    password: options.password || null,
+                    releaseDate: options.releaseDate || null
                 }),
                 signal: this.abortController.signal
             });
@@ -38,6 +39,7 @@ export class UploadManager {
 
             const initData = await initResponse.json();
             this.fileId = initData.fileId;
+            const uploadId = initData.uploadId; // Capture uploadId
             this.state = 'uploading';
 
             let parts = [];
@@ -60,6 +62,7 @@ export class UploadManager {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     fileId: this.fileId,
+                    uploadId: uploadId, // Send uploadId back
                     parts: parts.length > 0 ? parts : undefined
                 }),
                 signal: this.abortController.signal
@@ -82,7 +85,7 @@ export class UploadManager {
     }
 
     async uploadSingle(file, uploadUrl) {
-        const response = await fetch(uploadUrl, {
+        await this.fetchWithRetry(uploadUrl, {
             method: 'PUT',
             body: file,
             headers: {
@@ -90,8 +93,6 @@ export class UploadManager {
             },
             signal: this.abortController.signal
         });
-
-        if (!response.ok) throw new Error('S3 upload failed');
 
         this.onProgress?.({ uploadedChunks: 1, totalChunks: 1 });
     }
@@ -108,13 +109,11 @@ export class UploadManager {
             const end = Math.min(start + chunkSize, file.size);
             const chunk = file.slice(start, end);
 
-            const response = await fetch(url, {
+            const response = await this.fetchWithRetry(url, {
                 method: 'PUT',
                 body: chunk,
                 signal: this.abortController.signal
             });
-
-            if (!response.ok) throw new Error(`Part ${partNumber} upload failed`);
 
             // Get ETag from response for completing multipart
             const etag = response.headers.get('ETag');
@@ -126,12 +125,27 @@ export class UploadManager {
         return parts;
     }
 
+    // Helper for retries
+    async fetchWithRetry(url, options, retries = 3) {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                return response;
+            } catch (err) {
+                if (i === retries - 1 || options.signal?.aborted) throw err;
+                // Exponential backoff: 1s, 2s, 4s
+                await new Promise(r => setTimeout(r, 1000 * Math.pow(2, i)));
+            }
+        }
+    }
+
     cancel() {
         this.state = 'cancelled';
         this.abortController?.abort();
     }
 
-    // Pause/Resume not supported with presigned URLs
-    pause() { console.warn('Pause not supported with direct S3 upload'); }
-    resume() { console.warn('Resume not supported with direct S3 upload'); }
+    // Pause/Resume not fully supported yet (requires persistence)
+    pause() { this.cancel(); }
+    resume() { console.warn('To resume, retry the upload. It will restart.'); }
 }

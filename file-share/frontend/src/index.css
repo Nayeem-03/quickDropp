@@ -1,1 +1,31 @@
 @import "tailwindcss";
+
+@theme {
+  --color-brand-primary: #6366f1; /* Indigo 500 */
+  --color-brand-secondary: #ec4899; /* Pink 500 */
+  --color-brand-dark: #0f172a; /* Slate 900 */
+  --font-sans: 'Inter', system-ui, sans-serif;
+  
+  --animate-fade-in: fade-in 0.5s ease-out;
+  --animate-slide-up: slide-up 0.5s ease-out;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  
+  @keyframes slide-up {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-slate-950 text-white font-sans antialiased;
+  background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 70%);
+  min-height: 100vh;
+}

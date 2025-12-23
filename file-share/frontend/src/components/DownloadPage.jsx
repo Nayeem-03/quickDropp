@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { API_URL } from '../config.js';
+import { FilePreview } from './FilePreview.jsx';
 
 export function DownloadPage() {
     const { fileId } = useParams();
@@ -11,6 +12,11 @@ export function DownloadPage() {
     const [password, setPassword] = useState('');
     const [passwordError, setPasswordError] = useState('');
     const [needsPassword, setNeedsPassword] = useState(false);
+    const [releaseDate, setReleaseDate] = useState(null);
+    const [countdown, setCountdown] = useState('');
+    const [showPreview, setShowPreview] = useState(false);
+    const [previewUrl, setPreviewUrl] = useState(null);
+    const [loadingPreview, setLoadingPreview] = useState(false);
 
     useEffect(() => {
         fetch(`${API_URL}/api/files/${fileId}`)
@@ -19,6 +25,10 @@ export function DownloadPage() {
                     const data = await res.json().catch(() => ({}));
                     if (res.status === 410) {
                         throw { message: 'File has expired', type: 'expired' };
+                    }
+                    if (res.status === 403 && data.releaseDate) {
+                        setReleaseDate(data.releaseDate);
+                        throw { message: 'File not yet released', type: 'scheduled' };
                     }
                     throw { message: data.error || 'File not found', type: 'not_found' };
                 }
@@ -34,6 +44,43 @@ export function DownloadPage() {
             });
     }, [fileId]);
 
+    // Countdown timer for scheduled access
+    useEffect(() => {
+        if (!releaseDate) return;
+
+        const updateCountdown = () => {
+            const now = new Date();
+            const release = new Date(releaseDate);
+            const diff = release - now;
+
+            if (diff <= 0) {
+                setCountdown('Available now!');
+                // Reload to fetch metadata
+                window.location.reload();
+                return;
+            }
+
+            const days = Math.floor(diff / 86400000);
+            const hours = Math.floor((diff % 86400000) / 3600000);
+            const minutes = Math.floor((diff % 3600000) / 60000);
+            const seconds = Math.floor((diff % 60000) / 1000);
+
+            if (days > 0) {
+                setCountdown(`${days}d ${hours}h ${minutes}m ${seconds}s`);
+            } else if (hours > 0) {
+                setCountdown(`${hours}h ${minutes}m ${seconds}s`);
+            } else if (minutes > 0) {
+                setCountdown(`${minutes}m ${seconds}s`);
+            } else {
+                setCountdown(`${seconds}s`);
+            }
+        };
+
+        updateCountdown();
+        const interval = setInterval(updateCountdown, 1000);
+        return () => clearInterval(interval);
+    }, [releaseDate]);
+
     const handleDownload = async () => {
         if (needsPassword && !password) {
             setPasswordError('Please enter the password');
@@ -44,6 +91,34 @@ export function DownloadPage() {
         setPasswordError('');
 
         try {
+            // Check if file type supports preview
+            const isPreviewable = metadata?.mimeType && (
+                metadata.mimeType.startsWith('image/') ||
+                metadata.mimeType.startsWith('video/') ||
+                metadata.mimeType.startsWith('audio/') ||
+                metadata.mimeType === 'application/pdf' ||
+                metadata.mimeType.startsWith('text/') ||
+                ['application/json', 'application/javascript'].includes(metadata.mimeType)
+            );
+
+            // If previewable, show preview first
+            if (isPreviewable) {
+                const previewResponse = await fetch(`${API_URL}/api/files/preview/${fileId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password: password || null })
+                });
+
+                if (previewResponse.ok) {
+                    const { previewUrl: url } = await previewResponse.json();
+                    setPreviewUrl(url);
+                    setShowPreview(true);
+                    setDownloading(false);
+                    return; // Don't download yet, let user close preview first
+                }
+            }
+
+            // For non-previewable files or if preview fails, proceed with download
             const response = await fetch(`${API_URL}/api/files/download/${fileId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -72,6 +147,39 @@ export function DownloadPage() {
         }
 
         setTimeout(() => setDownloading(false), 2000);
+    };
+
+    const handlePreview = async () => {
+        if (needsPassword && !password) {
+            setPasswordError('Please enter the password');
+            return;
+        }
+
+        setLoadingPreview(true);
+        setPasswordError('');
+
+        try {
+            const response = await fetch(`${API_URL}/api/files/preview/${fileId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: password || null })
+            });
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                setPasswordError(response.status === 401 ? (data.error || 'Incorrect password') : (data.error || 'Preview failed'));
+                setLoadingPreview(false);
+                return;
+            }
+
+            const { previewUrl: url } = await response.json();
+            setPreviewUrl(url);
+            setShowPreview(true);
+        } catch {
+            setPasswordError('Preview failed');
+        }
+
+        setLoadingPreview(false);
     };
 
     const formatFileSize = (bytes) => {
@@ -105,16 +213,39 @@ export function DownloadPage() {
 
                     {error && (
                         <div className="text-center space-y-5">
-                            <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center ${errorType === 'expired' ? 'bg-amber-500/10' : 'bg-red-500/10'}`}>
-                                <svg className={`w-8 h-8 ${errorType === 'expired' ? 'text-amber-400' : 'text-red-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center ${errorType === 'expired' ? 'bg-amber-500/10' :
+                                errorType === 'scheduled' ? 'bg-blue-500/10' :
+                                    'bg-red-500/10'
+                                }`}>
+                                <svg className={`w-8 h-8 ${errorType === 'expired' ? 'text-amber-400' :
+                                    errorType === 'scheduled' ? 'text-blue-400' :
+                                        'text-red-400'
+                                    }`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    {errorType === 'scheduled' ? (
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    ) : (
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    )}
                                 </svg>
                             </div>
                             <div>
-                                <h2 className="text-xl font-semibold text-white">{errorType === 'expired' ? 'File Expired' : errorType === 'deleted' ? 'File Deleted' : 'File Not Found'}</h2>
+                                <h2 className="text-xl font-semibold text-white">
+                                    {errorType === 'expired' ? 'File Expired' :
+                                        errorType === 'deleted' ? 'File Deleted' :
+                                            errorType === 'scheduled' ? 'File Locked' :
+                                                'File Not Found'}
+                                </h2>
                                 <p className="text-slate-500 text-sm mt-2">{error}</p>
+                                {errorType === 'scheduled' && countdown && (
+                                    <div className="mt-4 p-4 bg-slate-800 rounded-xl">
+                                        <p className="text-xs text-slate-400 mb-2">Available in:</p>
+                                        <p className="text-2xl font-bold text-blue-400">{countdown}</p>
+                                    </div>
+                                )}
                             </div>
-                            <Link to="/" className="inline-block w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors">Upload a File</Link>
+                            {errorType !== 'scheduled' && (
+                                <Link to="/" className="inline-block w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors">Upload a File</Link>
+                            )}
                         </div>
                     )}
 
@@ -158,9 +289,12 @@ export function DownloadPage() {
                                 </div>
                             )}
 
-                            <button onClick={handleDownload} disabled={downloading}
-                                className={`w-full py-3 bg-blue-600 text-white font-medium rounded-xl transition-colors ${downloading ? 'opacity-75 cursor-not-allowed' : 'hover:bg-blue-500'}`}>
-                                {downloading ? 'Downloading...' : 'Download'}
+                            <button
+                                onClick={handleDownload}
+                                disabled={downloading}
+                                className={`w-full py-3 bg-blue-600 text-white font-medium rounded-xl transition-colors ${downloading ? 'opacity-75 cursor-not-allowed' : 'hover:bg-blue-500'}`}
+                            >
+                                {downloading ? 'Loading...' : '⬇️ Download'}
                             </button>
 
                             <Link to="/" className="inline-block text-slate-500 hover:text-slate-300 transition-colors text-sm">Share your own file →</Link>
@@ -169,6 +303,16 @@ export function DownloadPage() {
                 </div>
                 <p className="text-center text-slate-600 text-xs mt-5">No limits • No registration</p>
             </div>
+
+            {/* Preview Modal */}
+            {showPreview && previewUrl && metadata && (
+                <FilePreview
+                    previewUrl={previewUrl}
+                    fileName={metadata.fileName}
+                    mimeType={metadata.mimeType}
+                    onClose={() => setShowPreview(false)}
+                />
+            )}
         </div>
     );
 }
