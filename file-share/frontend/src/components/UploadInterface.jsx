@@ -53,47 +53,70 @@ export function UploadInterface() {
             }
         };
 
+        // Retry resume with exponential backoff if network is unstable
+        const attemptResume = async (retryCount = 0, maxRetries = 3) => {
+            const pending = UploadManager.hasPendingUpload();
+            if (!pending || !file || !UploadManager.fileMatchesPending(file, pending)) return;
+
+            // Sync progress from localStorage before resuming (accurate state)
+            const completedParts = pending.completedParts || [];
+            const resumeProgress = Math.round((completedParts.length / pending.totalParts) * 100);
+            setProgress(resumeProgress);
+            progressFloorRef.current = resumeProgress;
+
+            let completedBytes = 0;
+            for (const part of completedParts) {
+                const start = (part.PartNumber - 1) * pending.chunkSize;
+                const end = Math.min(start + pending.chunkSize, pending.fileSize);
+                completedBytes += (end - start);
+            }
+            setUploadedBytes(completedBytes);
+            setTotalBytes(pending.fileSize);
+
+            setUploadState('uploading');
+            setUploadSpeed(0);
+
+            uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
+                safeUpdateProgress(Math.round((uploadedChunks / totalChunks) * 100));
+                if (speed) setUploadSpeed(speed);
+                if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
+                if (totalBytes !== undefined) setTotalBytes(totalBytes);
+            };
+
+            try {
+                const result = await uploadManager.resumeUpload(file, uploadManager.onProgress);
+                if (result.success) {
+                    setShareLink(result.shareLink);
+                    setUploadState('completed');
+                    setPendingUpload(null);
+                } else if (result.paused) {
+                    // Resume failed - retry if we're still online and have retries left
+                    if (navigator.onLine && retryCount < maxRetries) {
+                        setUploadState('paused');
+                        const delay = Math.min(2000 * Math.pow(2, retryCount), 8000); // 2s, 4s, 8s
+                        setTimeout(() => attemptResume(retryCount + 1, maxRetries), delay);
+                    } else {
+                        setUploadState('paused');
+                    }
+                }
+            } catch {
+                // Same retry logic on catch
+                if (navigator.onLine && retryCount < maxRetries) {
+                    setUploadState('paused');
+                    const delay = Math.min(2000 * Math.pow(2, retryCount), 8000);
+                    setTimeout(() => attemptResume(retryCount + 1, maxRetries), delay);
+                } else {
+                    setUploadState('paused');
+                }
+            }
+        };
+
         const handleOnline = () => {
             if (uploadState === 'paused' && file) {
                 const pending = UploadManager.hasPendingUpload();
                 if (pending && UploadManager.fileMatchesPending(file, pending)) {
-                    // Sync progress from localStorage before resuming (accurate state)
-                    const completedParts = pending.completedParts || [];
-                    const resumeProgress = Math.round((completedParts.length / pending.totalParts) * 100);
-                    setProgress(resumeProgress);
-                    progressFloorRef.current = resumeProgress; // Set floor to prevent backward jumps
-
-                    // Calculate accurate bytes from completed parts
-                    let completedBytes = 0;
-                    for (const part of completedParts) {
-                        const start = (part.PartNumber - 1) * pending.chunkSize;
-                        const end = Math.min(start + pending.chunkSize, pending.fileSize);
-                        completedBytes += (end - start);
-                    }
-                    setUploadedBytes(completedBytes);
-                    setTotalBytes(pending.fileSize);
-
-                    setUploadState('uploading');
-                    setUploadSpeed(0);
-
-                    uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
-                        safeUpdateProgress(Math.round((uploadedChunks / totalChunks) * 100));
-                        if (speed) setUploadSpeed(speed);
-                        if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
-                        if (totalBytes !== undefined) setTotalBytes(totalBytes);
-                    };
-                    uploadManager.resumeUpload(file, uploadManager.onProgress)
-                        .then(result => {
-                            if (result.success) {
-                                setShareLink(result.shareLink);
-                                setUploadState('completed');
-                                setPendingUpload(null);
-                            } else if (result.paused) {
-                                // Upload paused again (e.g., network dropped during resume)
-                                setUploadState('paused');
-                            }
-                        })
-                        .catch(() => setUploadState('paused'));
+                    // Delay slightly to let network stabilize
+                    setTimeout(() => attemptResume(0, 3), 1000);
                 }
             }
         };
