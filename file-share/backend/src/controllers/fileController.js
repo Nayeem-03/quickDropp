@@ -101,8 +101,8 @@ export const previewFile = async (req, res) => {
             }
         }
 
-        // Generate short-lived presigned URL for preview (5 minutes)
-        const previewUrl = await getSignedDownloadUrl(link.s3Key, link.originalName, 300);
+        // Generate short-lived presigned URL for preview (5 minutes) with inline disposition
+        const previewUrl = await getSignedDownloadUrl(link.s3Key, link.originalName, 300, true);
 
         res.json({
             previewUrl,

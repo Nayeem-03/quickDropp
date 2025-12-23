@@ -88,6 +88,33 @@ export class UploadManager {
         return pending && getFileFingerprint(file) === pending.fingerprint;
     }
 
+    // Calculate accurate bytes from completed parts
+    calculateCompletedBytes(completedParts, chunkSize, fileSize) {
+        if (!completedParts || completedParts.length === 0) return 0;
+        let total = 0;
+        for (const part of completedParts) {
+            const partNumber = part.PartNumber;
+            const start = (partNumber - 1) * chunkSize;
+            const end = Math.min(start + chunkSize, fileSize);
+            total += (end - start);
+        }
+        return total;
+    }
+
+    // Fetch fresh presigned URLs for remaining parts
+    async refreshPartUrls(fileId, uploadId, partNumbers) {
+        const response = await fetch(`${API_URL}/api/upload/refresh-urls`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileId, uploadId, partNumbers })
+        });
+        if (!response.ok) {
+            throw new Error('Failed to refresh presigned URLs');
+        }
+        const data = await response.json();
+        return data.partUrls;
+    }
+
     // Resume an interrupted upload
     async resumeUpload(file, onProgress) {
         const pending = UploadManager.hasPendingUpload();
@@ -106,19 +133,31 @@ export class UploadManager {
             let parts = pending.completedParts || [];
             const completedPartNumbers = new Set(parts.map(p => p.PartNumber));
 
-            // Filter out already completed parts
-            const remainingPartUrls = pending.partUrls.filter(
-                p => !completedPartNumbers.has(p.partNumber)
-            );
+            // Calculate remaining part numbers
+            const remainingPartNumbers = pending.partUrls
+                .filter(p => !completedPartNumbers.has(p.partNumber))
+                .map(p => p.partNumber);
 
-            // Upload remaining parts
-            if (remainingPartUrls.length > 0) {
+            if (remainingPartNumbers.length === 0) {
+                // All parts already uploaded, just complete
+            } else {
+                // Fetch FRESH presigned URLs for remaining parts
+                const freshPartUrls = await this.refreshPartUrls(
+                    pending.fileId,
+                    pending.uploadId,
+                    remainingPartNumbers
+                );
+
+                // Calculate accurate bytes already uploaded
+                const completedBytes = this.calculateCompletedBytes(parts, pending.chunkSize, file.size);
+
                 const newParts = await this.uploadMultipartResume(
                     file,
-                    remainingPartUrls,
+                    freshPartUrls,
                     pending.chunkSize,
                     parts.length,
-                    pending.totalParts
+                    pending.totalParts,
+                    completedBytes // Pass accurate base bytes
                 );
                 parts = [...parts, ...newParts];
             }
@@ -308,8 +347,9 @@ export class UploadManager {
     }
 
     // Parallel upload helper with real-time progress tracking
+    // Returns { success: true, part } or { success: false, isNetworkError: bool }
     uploadChunkWithXHR(file, partNumber, url, chunkSize, onChunkProgress) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve) => {
             const start = (partNumber - 1) * chunkSize;
             const end = Math.min(start + chunkSize, file.size);
             const chunk = file.slice(start, end);
@@ -326,14 +366,21 @@ export class UploadManager {
             xhr.onload = () => {
                 if (xhr.status >= 200 && xhr.status < 300) {
                     const etag = xhr.getResponseHeader('ETag');
-                    resolve({ PartNumber: partNumber, ETag: etag });
+                    resolve({ success: true, part: { PartNumber: partNumber, ETag: etag } });
                 } else {
-                    reject(new Error(`Upload failed with status ${xhr.status}`));
+                    // Server error (not network)
+                    resolve({ success: false, isNetworkError: false, partNumber });
                 }
             };
 
-            xhr.onerror = () => reject(new Error('Chunk upload failed'));
-            xhr.onabort = () => reject(new Error('Chunk upload aborted'));
+            xhr.onerror = () => {
+                // Network error - signal for graceful pause
+                resolve({ success: false, isNetworkError: true, partNumber });
+            };
+
+            xhr.onabort = () => {
+                resolve({ success: false, isNetworkError: false, partNumber, aborted: true });
+            };
 
             xhr.open('PUT', url);
             xhr.send(chunk);
@@ -347,7 +394,7 @@ export class UploadManager {
 
         // Initialize speed tracking
         this.uploadStartTime = Date.now();
-        this.bytesUploaded = 0; // Base bytes from completed batches
+        this.bytesUploaded = 0;
         this.lastSpeedUpdate = Date.now();
         this.lastBytesForSpeed = 0;
 
@@ -358,7 +405,6 @@ export class UploadManager {
         for (let i = 0; i < partUrls.length; i += CONCURRENT_UPLOADS) {
             if (this.state === 'cancelled' || this.state === 'paused') break;
 
-            // Get the next batch of chunks to upload
             const batch = partUrls.slice(i, i + CONCURRENT_UPLOADS);
             batchProgress.clear();
 
@@ -366,7 +412,6 @@ export class UploadManager {
             const onBatchChunkProgress = (partNumber, loaded) => {
                 batchProgress.set(partNumber, loaded);
 
-                // Calculate total uploaded so far (base + current batch sum)
                 let currentBatchTotal = 0;
                 for (const loadedBytes of batchProgress.values()) {
                     currentBatchTotal += loadedBytes;
@@ -374,7 +419,6 @@ export class UploadManager {
 
                 const totalUploaded = this.bytesUploaded + currentBatchTotal;
 
-                // Calculate speed every 500ms
                 const now = Date.now();
                 const timeDiff = (now - this.lastSpeedUpdate) / 1000;
 
@@ -385,7 +429,6 @@ export class UploadManager {
                     this.lastSpeedUpdate = now;
                     this.lastBytesForSpeed = totalUploaded;
 
-                    // Estimate total completed chunks based on bytes
                     const estimatedChunks = completedCount + (currentBatchTotal / chunkSize);
 
                     this.onProgress?.({
@@ -403,45 +446,59 @@ export class UploadManager {
                 this.uploadChunkWithXHR(file, partNumber, url, chunkSize, onBatchChunkProgress)
             );
 
-            try {
-                const batchResults = await Promise.all(batchPromises);
-                parts.push(...batchResults);
-                completedCount += batchResults.length;
+            const batchResults = await Promise.all(batchPromises);
 
-                // Update base bytesUploaded with this completed batch
-                // We calculate exact size to be accurate
-                const batchBytes = batch.reduce((acc, _, idx) => {
-                    // Calculate exact size of this chunk (might be smaller for last chunk)
-                    const partNum = batch[idx].partNumber;
+            // Process results - check for network errors
+            let hasNetworkError = false;
+            for (const result of batchResults) {
+                if (result.success) {
+                    parts.push(result.part);
+                    completedCount++;
+
+                    // Calculate and add bytes for this part
+                    const partNum = result.part.PartNumber;
                     const start = (partNum - 1) * chunkSize;
                     const end = Math.min(start + chunkSize, file.size);
-                    return acc + (end - start);
-                }, 0);
+                    this.bytesUploaded += (end - start);
 
-                this.bytesUploaded += batchBytes;
-                this.lastBytesForSpeed = this.bytesUploaded; // Resync for next batch
-                this.lastSpeedUpdate = Date.now(); // Reset timer
-
-                // Save progress after each batch
-                this.updateCompletedParts(parts);
-
-            } catch (error) {
-                if (this.state === 'cancelled' || this.state === 'paused') break;
-                throw error;
+                    // Save progress after EACH successful part (granular saving)
+                    this.updateCompletedParts(parts);
+                } else if (result.isNetworkError) {
+                    hasNetworkError = true;
+                }
+                // Aborted or server errors are ignored for now (will be retried on resume)
             }
+
+            // Sync speed tracking after processing batch
+            this.lastBytesForSpeed = this.bytesUploaded;
+            this.lastSpeedUpdate = Date.now();
+
+            // If network error occurred, trigger pause and break
+            if (hasNetworkError) {
+                this.state = 'paused';
+                break;
+            }
+
+            if (this.state === 'cancelled' || this.state === 'paused') break;
         }
 
         return parts;
     }
 
     // Resume version of multipart upload (starts from offset) - with parallel uploads
-    async uploadMultipartResume(file, remainingPartUrls, chunkSize, completedCount, totalParts) {
+    // baseBytes: If provided, use this as the accurate starting bytes. Otherwise fall back to estimate.
+    async uploadMultipartResume(file, remainingPartUrls, chunkSize, completedCount, totalParts, baseBytes = null) {
         const parts = [];
         let newCompletedCount = 0;
 
-        // Initialize speed tracking
+        // CRITICAL: Capture the original completed parts ONCE at the start
+        // Do NOT re-read inside the loop as it causes duplicate accumulation
+        const originalPending = UploadManager.hasPendingUpload();
+        const originalCompletedParts = originalPending?.completedParts || [];
+
+        // Initialize speed tracking with accurate bytes if provided, otherwise estimate
         this.uploadStartTime = Date.now();
-        this.bytesUploaded = completedCount * chunkSize; // Account for already uploaded
+        this.bytesUploaded = baseBytes !== null ? baseBytes : (completedCount * chunkSize);
         this.lastSpeedUpdate = Date.now();
         this.lastBytesForSpeed = this.bytesUploaded;
 
@@ -492,34 +549,41 @@ export class UploadManager {
                 this.uploadChunkWithXHR(file, partNumber, url, chunkSize, onBatchChunkProgress)
             );
 
-            try {
-                const batchResults = await Promise.all(batchPromises);
-                parts.push(...batchResults);
-                newCompletedCount += batchResults.length;
+            const batchResults = await Promise.all(batchPromises);
 
-                // Update base bytes with this completed batch
-                const batchBytes = batch.reduce((acc, _, idx) => {
-                    const partNum = batch[idx].partNumber;
+            // Process results - check for network errors
+            let hasNetworkError = false;
+
+            for (const result of batchResults) {
+                if (result.success) {
+                    parts.push(result.part);
+                    newCompletedCount++;
+
+                    // Calculate and add bytes for this part
+                    const partNum = result.part.PartNumber;
                     const start = (partNum - 1) * chunkSize;
                     const end = Math.min(start + chunkSize, file.size);
-                    return acc + (end - start);
-                }, 0);
+                    this.bytesUploaded += (end - start);
 
-                this.bytesUploaded += batchBytes;
-                this.lastBytesForSpeed = this.bytesUploaded;
-                this.lastSpeedUpdate = Date.now();
-
-                // Update storage with new completed parts
-                const pending = UploadManager.hasPendingUpload();
-                if (pending) {
-                    const allParts = [...(pending.completedParts || []), ...parts];
+                    // Save progress: original parts (captured once) + new parts from this session
+                    const allParts = [...originalCompletedParts, ...parts];
                     this.updateCompletedParts(allParts);
+                } else if (result.isNetworkError) {
+                    hasNetworkError = true;
                 }
-
-            } catch (error) {
-                if (this.state === 'cancelled' || this.state === 'paused') break;
-                throw error;
             }
+
+            // Sync speed tracking
+            this.lastBytesForSpeed = this.bytesUploaded;
+            this.lastSpeedUpdate = Date.now();
+
+            // If network error occurred, trigger pause and break
+            if (hasNetworkError) {
+                this.state = 'paused';
+                break;
+            }
+
+            if (this.state === 'cancelled' || this.state === 'paused') break;
         }
 
         return parts;

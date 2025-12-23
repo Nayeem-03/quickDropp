@@ -54,8 +54,24 @@ export function UploadInterface() {
             if (uploadState === 'paused' && file) {
                 const pending = UploadManager.hasPendingUpload();
                 if (pending && UploadManager.fileMatchesPending(file, pending)) {
+                    // Sync progress from localStorage before resuming (accurate state)
+                    const completedParts = pending.completedParts || [];
+                    const resumeProgress = Math.round((completedParts.length / pending.totalParts) * 100);
+                    setProgress(resumeProgress);
+
+                    // Calculate accurate bytes from completed parts
+                    let completedBytes = 0;
+                    for (const part of completedParts) {
+                        const start = (part.PartNumber - 1) * pending.chunkSize;
+                        const end = Math.min(start + pending.chunkSize, pending.fileSize);
+                        completedBytes += (end - start);
+                    }
+                    setUploadedBytes(completedBytes);
+                    setTotalBytes(pending.fileSize);
+
                     setUploadState('uploading');
                     setUploadSpeed(0);
+
                     uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
                         setProgress(Math.round((uploadedChunks / totalChunks) * 100));
                         if (speed) setUploadSpeed(speed);
@@ -68,6 +84,9 @@ export function UploadInterface() {
                                 setShareLink(result.shareLink);
                                 setUploadState('completed');
                                 setPendingUpload(null);
+                            } else if (result.paused) {
+                                // Upload paused again (e.g., network dropped during resume)
+                                setUploadState('paused');
                             }
                         })
                         .catch(() => setUploadState('paused'));
@@ -138,6 +157,25 @@ export function UploadInterface() {
         }
     };
 
+    const syncUIFromLocalStorage = () => {
+        const pending = UploadManager.hasPendingUpload();
+        if (pending) {
+            const completedParts = pending.completedParts || [];
+            const resumeProgress = Math.round((completedParts.length / pending.totalParts) * 100);
+            setProgress(resumeProgress);
+
+            // Calculate accurate bytes
+            let completedBytes = 0;
+            for (const part of completedParts) {
+                const start = (part.PartNumber - 1) * pending.chunkSize;
+                const end = Math.min(start + pending.chunkSize, pending.fileSize);
+                completedBytes += (end - start);
+            }
+            setUploadedBytes(completedBytes);
+            setTotalBytes(pending.fileSize);
+        }
+    };
+
     const getExpiryMs = () => {
         if (expiry === 'self-destruct') return -1;
         if (expiry === 'forever') return 0;
@@ -152,21 +190,29 @@ export function UploadInterface() {
         if (!file) return;
         setUploadState('uploading');
         setUploadSpeed(0);
+        setTotalBytes(file.size);
+
         uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
             setProgress(Math.round((uploadedChunks / totalChunks) * 100));
             if (speed) setUploadSpeed(speed);
             if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
             if (totalBytes !== undefined) setTotalBytes(totalBytes);
         };
+
         const result = await uploadManager.uploadFile(file, {
             expiryMs: getExpiryMs(),
             selfDestruct: expiry === 'self-destruct',
             password: enablePassword && password ? password : null,
             releaseDate: enableScheduledAccess && releaseDate ? new Date(releaseDate).toISOString() : null
         });
+
         if (result.success) {
             setShareLink(result.shareLink);
             setUploadState('completed');
+        } else if (result.paused || uploadManager.state === 'paused') {
+            // Network error caused pause - sync UI from saved state
+            syncUIFromLocalStorage();
+            setUploadState('paused');
         }
     };
 
@@ -179,18 +225,27 @@ export function UploadInterface() {
         }
         setUploadState('uploading');
         setUploadSpeed(0);
+
+        // Pre-sync accurate progress before starting
+        syncUIFromLocalStorage();
+
         uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
             setProgress(Math.round((uploadedChunks / totalChunks) * 100));
             if (speed) setUploadSpeed(speed);
             if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
             if (totalBytes !== undefined) setTotalBytes(totalBytes);
         };
+
         try {
             const result = await uploadManager.resumeUpload(file, uploadManager.onProgress);
             if (result.success) {
                 setShareLink(result.shareLink);
                 setUploadState('completed');
                 setPendingUpload(null);
+            } else if (result.paused || uploadManager.state === 'paused') {
+                // Network error caused pause - sync UI from saved state
+                syncUIFromLocalStorage();
+                setUploadState('paused');
             }
         } catch {
             setUploadState('ready');
@@ -315,53 +370,91 @@ export function UploadInterface() {
                                 )}
                             </div>
 
-                            {/* Actions / Settings Toggle */}
-                            <div className="mt-4 flex items-center justify-between">
+                            {/* Add Files / Add Folder Buttons */}
+                            <div className="mt-4 flex items-center justify-center gap-3">
+                                <button
+                                    onClick={() => document.getElementById('file-input').click()}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-neutral-400 hover:text-indigo-400 bg-neutral-900/50 hover:bg-neutral-800/50 rounded-lg border border-neutral-800 hover:border-indigo-500/30 transition-all"
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                    </svg>
+                                    Add Files
+                                </button>
                                 <button
                                     onClick={() => document.getElementById('folder-input').click()}
-                                    className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-neutral-400 hover:text-indigo-400 bg-neutral-900/50 hover:bg-neutral-800/50 rounded-lg border border-neutral-800 hover:border-indigo-500/30 transition-all"
                                 >
-                                    Upload folder
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                                    </svg>
+                                    Add Folder
                                 </button>
-                                {file && (
-                                    <button
-                                        onClick={() => setShowSettings(!showSettings)}
-                                        className={`flex items-center gap-1.5 text-xs transition-colors ${showSettings ? 'text-indigo-400' : 'text-neutral-500 hover:text-neutral-300'}`}
-                                    >
-                                        <span>Settings</span>
-                                        <svg className={`w-3.5 h-3.5 transition-transform ${showSettings ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                                    </button>
-                                )}
                             </div>
 
-                            {/* Collapsible Settings */}
-                            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${showSettings && file ? 'max-h-96 opacity-100 mt-4' : 'max-h-0 opacity-0'}`}>
-                                <div className="space-y-4 p-4 bg-neutral-900/30 rounded-xl border border-neutral-800/50">
-                                    {/* Expiry */}
-                                    <div className="flex items-center justify-between">
+                            {/* Options Panel - Always Visible */}
+                            <div className="mt-4 p-4 bg-neutral-900/30 rounded-xl border border-neutral-800/50 space-y-4">
+                                {/* Expiry */}
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <svg className="w-4 h-4 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
                                         <span className="text-xs text-neutral-400">Expires</span>
-                                        <select
-                                            value={expiry}
-                                            onChange={(e) => setExpiry(e.target.value)}
-                                            className="bg-transparent text-xs text-indigo-400 outline-none cursor-pointer text-right"
-                                        >
-                                            {EXPIRY_OPTIONS.map(opt => <option key={opt.value} value={opt.value} className="bg-neutral-900 text-neutral-300">{opt.label}</option>)}
-                                        </select>
                                     </div>
+                                    <select
+                                        value={expiry}
+                                        onChange={(e) => setExpiry(e.target.value)}
+                                        className="bg-transparent text-xs text-indigo-400 outline-none cursor-pointer text-right"
+                                    >
+                                        {EXPIRY_OPTIONS.map(opt => <option key={opt.value} value={opt.value} className="bg-neutral-900 text-neutral-300">{opt.label}</option>)}
+                                    </select>
+                                </div>
 
-                                    {/* Password Toggle */}
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-between">
-                                            <span className="text-xs text-neutral-400">Password</span>
-                                            <button onClick={() => setEnablePassword(!enablePassword)} className={`w-8 h-4 rounded-full relative transition-colors ${enablePassword ? 'bg-indigo-500' : 'bg-neutral-700'}`}>
-                                                <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${enablePassword ? 'left-4.5' : 'left-0.5'}`} />
-                                            </button>
+                                {/* Password Toggle */}
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <svg className="w-4 h-4 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                            </svg>
+                                            <span className="text-xs text-neutral-400">Password Protect</span>
                                         </div>
-                                        {enablePassword && (
-                                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Secret password"
-                                                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-indigo-500/50" />
-                                        )}
+                                        <button onClick={() => setEnablePassword(!enablePassword)} className={`w-8 h-4 rounded-full relative transition-colors ${enablePassword ? 'bg-indigo-500' : 'bg-neutral-700'}`}>
+                                            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${enablePassword ? 'left-4.5' : 'left-0.5'}`} />
+                                        </button>
                                     </div>
+                                    {enablePassword && (
+                                        <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter password"
+                                            className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-indigo-500/50" />
+                                    )}
+                                </div>
+
+                                {/* Scheduled Access */}
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <svg className="w-4 h-4 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <span className="text-xs text-neutral-400">Scheduled Access</span>
+                                        </div>
+                                        <button onClick={() => setEnableScheduledAccess(!enableScheduledAccess)} className={`w-8 h-4 rounded-full relative transition-colors ${enableScheduledAccess ? 'bg-indigo-500' : 'bg-neutral-700'}`}>
+                                            <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${enableScheduledAccess ? 'left-4.5' : 'left-0.5'}`} />
+                                        </button>
+                                    </div>
+                                    {enableScheduledAccess && (
+                                        <div className="space-y-1">
+                                            <input
+                                                type="datetime-local"
+                                                value={releaseDate}
+                                                onChange={e => setReleaseDate(e.target.value)}
+                                                min={new Date().toISOString().slice(0, 16)}
+                                                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-indigo-500/50"
+                                            />
+                                            <p className="text-[10px] text-neutral-600">File won't be accessible until this time</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
@@ -370,7 +463,7 @@ export function UploadInterface() {
                                 <button
                                     onClick={uploadState === 'resumable' ? handleResume : handleUpload}
                                     disabled={enablePassword && !password}
-                                    className={`w-full mt-6 py-3 rounded-xl font-medium text-sm transition-all duration-300 
+                                    className={`w-full mt-4 py-3 rounded-xl font-medium text-sm transition-all duration-300 
                                         ${enablePassword && !password ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/20'}`}
                                 >
                                     {uploadState === 'resumable' ? 'Resume Upload' : 'Upload File'}

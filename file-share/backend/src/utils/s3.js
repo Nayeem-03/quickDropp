@@ -79,11 +79,16 @@ export async function abortMultipartUpload(fileId, uploadId) {
 }
 
 // Get signed download URL
-export async function getSignedDownloadUrl(fileId, fileName, expiresIn = 3600) {
+// inline: if true, sets Content-Disposition to 'inline' for preview (displays in browser instead of downloading)
+export async function getSignedDownloadUrl(fileId, fileName, expiresIn = 3600, inline = false) {
+    const disposition = inline
+        ? `inline; filename="${fileName}"`
+        : `attachment; filename="${fileName}"`;
+
     const command = new GetObjectCommand({
         Bucket: BUCKET_NAME || process.env.S3_BUCKET_NAME,
         Key: fileId,
-        ResponseContentDisposition: `attachment; filename="${fileName}"`
+        ResponseContentDisposition: disposition
     });
 
     return getSignedUrl(getS3Client(), command, { expiresIn });

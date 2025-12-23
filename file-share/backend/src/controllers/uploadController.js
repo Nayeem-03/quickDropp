@@ -105,3 +105,32 @@ export const completeUpload = async (req, res) => {
         res.status(500).json({ error: 'Failed to complete upload' });
     }
 };
+
+// Refresh presigned URLs for resuming an interrupted multipart upload
+export const refreshPartUrls = async (req, res) => {
+    try {
+        const { fileId, uploadId, partNumbers } = req.body;
+
+        if (!fileId || !uploadId || !partNumbers || !Array.isArray(partNumbers)) {
+            return res.status(400).json({ error: 'Missing required fields: fileId, uploadId, partNumbers (array)' });
+        }
+
+        // Find the link to get the s3Key
+        const link = await Link.findOne({ linkId: fileId });
+        if (!link) {
+            return res.status(404).json({ error: 'File link not found' });
+        }
+
+        // Generate fresh presigned URLs for the requested part numbers
+        const partUrls = [];
+        for (const partNumber of partNumbers) {
+            const url = await getPresignedPartUrl(link.s3Key, uploadId, partNumber);
+            partUrls.push({ partNumber, url });
+        }
+
+        res.json({ partUrls });
+    } catch (error) {
+        console.error('Refresh part URLs error:', error);
+        res.status(500).json({ error: 'Failed to refresh presigned URLs' });
+    }
+};
