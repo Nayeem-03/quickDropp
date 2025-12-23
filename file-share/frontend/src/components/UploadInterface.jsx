@@ -433,20 +433,48 @@ export function UploadInterface() {
                             {/* Options Panel - Always Visible */}
                             <div className="mt-4 p-4 bg-neutral-900/30 rounded-xl border border-neutral-800/50 space-y-4">
                                 {/* Expiry */}
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <svg className="w-4 h-4 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                        <span className="text-xs text-neutral-400">Expires</span>
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <svg className="w-4 h-4 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                            <span className="text-xs text-neutral-400">Expires</span>
+                                        </div>
+                                        <select
+                                            value={expiry}
+                                            onChange={(e) => setExpiry(e.target.value)}
+                                            className="bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-indigo-400 outline-none cursor-pointer hover:border-indigo-500/50 focus:border-indigo-500 transition-colors"
+                                        >
+                                            {EXPIRY_OPTIONS.map(opt => (
+                                                <option key={opt.value} value={opt.value} className="bg-neutral-900 text-neutral-300">
+                                                    {opt.label}
+                                                </option>
+                                            ))}
+                                        </select>
                                     </div>
-                                    <select
-                                        value={expiry}
-                                        onChange={(e) => setExpiry(e.target.value)}
-                                        className="bg-transparent text-xs text-indigo-400 outline-none cursor-pointer text-right"
-                                    >
-                                        {EXPIRY_OPTIONS.map(opt => <option key={opt.value} value={opt.value} className="bg-neutral-900 text-neutral-300">{opt.label}</option>)}
-                                    </select>
+
+                                    {/* Custom Expiry Input */}
+                                    {expiry === 'custom' && (
+                                        <div className="flex items-center gap-2 pl-6">
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                value={customValue}
+                                                onChange={(e) => setCustomValue(e.target.value)}
+                                                placeholder="Enter time"
+                                                className="w-20 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-neutral-200 outline-none focus:border-indigo-500/50"
+                                            />
+                                            <select
+                                                value={customUnit}
+                                                onChange={(e) => setCustomUnit(e.target.value)}
+                                                className="bg-neutral-900 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-neutral-300 outline-none cursor-pointer"
+                                            >
+                                                <option value="minutes">Minutes</option>
+                                                <option value="hours">Hours</option>
+                                            </select>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Password Toggle */}

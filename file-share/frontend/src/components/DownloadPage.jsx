@@ -14,6 +14,7 @@ export function DownloadPage() {
     const [needsPassword, setNeedsPassword] = useState(false);
     const [releaseDate, setReleaseDate] = useState(null);
     const [countdown, setCountdown] = useState('');
+    const [expiryCountdown, setExpiryCountdown] = useState('');
 
     // Preview state
     const [showPreview, setShowPreview] = useState(false);
@@ -81,6 +82,43 @@ export function DownloadPage() {
         const interval = setInterval(updateCountdown, 1000);
         return () => clearInterval(interval);
     }, [releaseDate]);
+
+    // Countdown timer for expiry
+    useEffect(() => {
+        if (!metadata?.expiresAt) return;
+
+        const updateExpiryCountdown = () => {
+            const now = new Date();
+            const expiry = new Date(metadata.expiresAt);
+            const diff = expiry - now;
+
+            if (diff <= 0) {
+                setExpiryCountdown('Expired');
+                // Auto-refresh to show expired state
+                setTimeout(() => window.location.reload(), 500);
+                return;
+            }
+
+            const days = Math.floor(diff / 86400000);
+            const hours = Math.floor((diff % 86400000) / 3600000);
+            const minutes = Math.floor((diff % 3600000) / 60000);
+            const seconds = Math.floor((diff % 60000) / 1000);
+
+            if (days > 0) {
+                setExpiryCountdown(`${days}d ${hours}h ${minutes}m ${seconds}s`);
+            } else if (hours > 0) {
+                setExpiryCountdown(`${hours}h ${minutes}m ${seconds}s`);
+            } else if (minutes > 0) {
+                setExpiryCountdown(`${minutes}m ${seconds}s`);
+            } else {
+                setExpiryCountdown(`${seconds}s`);
+            }
+        };
+
+        updateExpiryCountdown();
+        const interval = setInterval(updateExpiryCountdown, 1000);
+        return () => clearInterval(interval);
+    }, [metadata?.expiresAt]);
 
     const handleDownload = async () => {
         if (needsPassword && !password) {
@@ -211,8 +249,8 @@ export function DownloadPage() {
                     {error && (
                         <div className="text-center py-4 animate-fade-in">
                             <div className={`w-12 h-12 mx-auto rounded-full flex items-center justify-center mb-4 ${errorType === 'expired' ? 'bg-amber-500/10 text-amber-500' :
-                                    errorType === 'scheduled' ? 'bg-indigo-500/10 text-indigo-500' :
-                                        'bg-red-500/10 text-red-500'
+                                errorType === 'scheduled' ? 'bg-indigo-500/10 text-indigo-500' :
+                                    'bg-red-500/10 text-red-500'
                                 }`}>
                                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     {errorType === 'scheduled' ? (
@@ -273,7 +311,14 @@ export function DownloadPage() {
                                 {/* Tags */}
                                 <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
                                     {metadata.selfDestruct && <span className="px-2 py-0.5 bg-red-500/10 border border-red-500/20 text-red-400 text-[10px] font-medium rounded-md uppercase tracking-wide">Self-destruct</span>}
-                                    {metadata.expiresAt && <span className="px-2 py-0.5 bg-neutral-800 border border-neutral-700 text-neutral-400 text-[10px] font-medium rounded-md uppercase tracking-wide">{formatExpiry(metadata.expiresAt)}</span>}
+                                    {metadata.expiresAt && (
+                                        <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 text-[10px] font-medium rounded-md uppercase tracking-wide flex items-center gap-1">
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            {expiryCountdown || formatExpiry(metadata.expiresAt)}
+                                        </span>
+                                    )}
                                 </div>
                             </div>
 
