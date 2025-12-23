@@ -18,35 +18,38 @@ export function FilePreview({ previewUrl, fileName, mimeType, onClose, onDownloa
     };
 
     return (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-slate-900 rounded-2xl border border-slate-800 max-w-5xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-neutral-950/95 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in" onClick={onClose}>
+            <div className="bg-[#0a0a0a] rounded-2xl border border-neutral-800 max-w-5xl w-full max-h-[90vh] overflow-hidden shadow-2xl shadow-black" onClick={(e) => e.stopPropagation()}>
                 {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b border-slate-800">
-                    <div className="flex-1 min-w-0">
-                        <h3 className="text-white font-semibold truncate">{fileName}</h3>
-                        <p className="text-slate-500 text-sm">{mimeType}</p>
+                <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-900/50">
+                    <div className="flex-1 min-w-0 pr-4">
+                        <h3 className="text-neutral-200 font-semibold truncate text-sm">{fileName}</h3>
+                        <p className="text-neutral-500 text-xs font-mono mt-0.5">{mimeType}</p>
                     </div>
                     <button
                         onClick={onClose}
-                        className="ml-4 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-neutral-800 text-neutral-500 hover:text-white transition-colors"
                     >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
                         </svg>
                     </button>
                 </div>
 
                 {/* Preview Content */}
-                <div className="relative bg-slate-950 overflow-auto max-h-[calc(90vh-80px)]">
+                <div className="relative bg-[#050505] overflow-auto max-h-[calc(90vh-140px)] min-h-[300px] flex items-center justify-center">
                     {loading && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="w-10 h-10 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin"></div>
+                        <div className="absolute inset-0 flex items-center justify-center z-10 bg-[#050505]">
+                            <div className="w-8 h-8 border-2 border-neutral-800 border-t-indigo-500 rounded-full animate-spin"></div>
                         </div>
                     )}
 
                     {error && (
                         <div className="p-12 text-center">
-                            <p className="text-red-400">{error}</p>
+                            <div className="w-12 h-12 mx-auto bg-red-500/10 rounded-full flex items-center justify-center mb-4 text-red-500">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                            </div>
+                            <p className="text-red-400 text-sm">{error}</p>
                         </div>
                     )}
 
@@ -55,7 +58,7 @@ export function FilePreview({ previewUrl, fileName, mimeType, onClose, onDownloa
                         <img
                             src={previewUrl}
                             alt={fileName}
-                            className="w-full h-auto"
+                            className={`max-w-full h-auto max-h-full object-contain transition-opacity duration-300 ${loading ? 'opacity-0' : 'opacity-100'}`}
                             onLoad={handleLoad}
                             onError={handleError}
                         />
@@ -66,7 +69,7 @@ export function FilePreview({ previewUrl, fileName, mimeType, onClose, onDownloa
                         <video
                             src={previewUrl}
                             controls
-                            className="w-full h-auto"
+                            className="max-w-full max-h-full"
                             onLoadedData={handleLoad}
                             onError={handleError}
                         >
@@ -76,7 +79,7 @@ export function FilePreview({ previewUrl, fileName, mimeType, onClose, onDownloa
 
                     {/* Audio Preview */}
                     {isAudio && (
-                        <div className="p-12">
+                        <div className="p-12 w-full max-w-md">
                             <audio
                                 src={previewUrl}
                                 controls
@@ -93,7 +96,7 @@ export function FilePreview({ previewUrl, fileName, mimeType, onClose, onDownloa
                     {isPDF && (
                         <iframe
                             src={previewUrl}
-                            className="w-full h-[calc(90vh-80px)]"
+                            className="w-full h-[calc(90vh-140px)]"
                             onLoad={handleLoad}
                             onError={handleError}
                             title={fileName}
@@ -110,32 +113,33 @@ export function FilePreview({ previewUrl, fileName, mimeType, onClose, onDownloa
                     )}
 
                     {/* Unsupported */}
-                    {!isImage && !isVideo && !isAudio && !isPDF && !isText && (
+                    {!isImage && !isVideo && !isAudio && !isPDF && !isText && !loading && !error && (
                         <div className="p-12 text-center">
-                            <div className="w-16 h-16 mx-auto mb-4 bg-slate-800 rounded-xl flex items-center justify-center">
-                                <svg className="w-8 h-8 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            <div className="w-16 h-16 mx-auto mb-4 bg-neutral-900 rounded-xl flex items-center justify-center border border-neutral-800">
+                                <svg className="w-8 h-8 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                 </svg>
                             </div>
-                            <p className="text-slate-400">Preview not available for this file type</p>
-                            <p className="text-slate-600 text-sm mt-2">Download the file to view it</p>
+                            <p className="text-neutral-400 font-medium text-sm">Preview not available</p>
+                            <p className="text-neutral-600 text-xs mt-2">Download the file to view its contents</p>
                         </div>
                     )}
                 </div>
 
                 {/* Footer with Download Button */}
-                <div className="flex items-center justify-end gap-3 p-4 border-t border-slate-800">
+                <div className="flex items-center justify-end gap-3 p-4 border-t border-neutral-800 bg-neutral-900/50">
                     <button
                         onClick={onClose}
-                        className="px-5 py-2 text-slate-400 hover:text-white transition-colors"
+                        className="px-5 py-2.5 text-neutral-400 hover:text-white transition-colors text-sm font-medium"
                     >
                         Cancel
                     </button>
                     <button
                         onClick={onDownload}
-                        className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors"
+                        className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl text-sm transition-all shadow-lg shadow-indigo-900/20 flex items-center gap-2"
                     >
-                        ⬇️ Confirm Download
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                        Download File
                     </button>
                 </div>
             </div>
@@ -158,8 +162,8 @@ function TextPreview({ url, onLoad, onError }) {
     }, [url]);
 
     return (
-        <div className="p-6">
-            <pre className="text-slate-300 text-sm font-mono whitespace-pre-wrap break-words bg-slate-900 p-4 rounded-lg overflow-auto max-h-[70vh]">
+        <div className="w-full h-full p-6 overflow-auto bg-[#050505]">
+            <pre className="text-neutral-400 text-xs font-mono whitespace-pre-wrap break-words">
                 {content}
             </pre>
         </div>

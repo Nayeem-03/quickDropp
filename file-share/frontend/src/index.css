@@ -1,22 +1,26 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-primary: #6366f1; /* Indigo 500 */
-  --color-brand-secondary: #ec4899; /* Pink 500 */
-  --color-brand-dark: #0f172a; /* Slate 900 */
+  --color-brand-primary: #6366f1;
+  /* Indigo 500 */
+  --color-brand-secondary: #a855f7;
+  /* Purple 500 */
+  --color-bg-dark: #0a0a0a;
+  /* Neutral 950 */
+  --color-bg-card: #171717;
+  /* Neutral 900 */
   --font-sans: 'Inter', system-ui, sans-serif;
-  
-  --animate-fade-in: fade-in 0.5s ease-out;
-  --animate-slide-up: slide-up 0.5s ease-out;
+
+  --animate-fade-in: fade-in 0.3s ease-out;
 
   @keyframes fade-in {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  
-  @keyframes slide-up {
-    from { transform: translateY(20px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
   }
 }
 
@@ -25,7 +29,27 @@
 }
 
 body {
-  @apply bg-slate-950 text-white font-sans antialiased;
-  background-image: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f172a 70%);
+  @apply bg-neutral-950 text-neutral-200 font-sans antialiased;
+  /* Very subtle top gradient for depth, almost invisible */
+  background-image: linear-gradient(to bottom, #171717 0%, #0a0a0a 20%);
   min-height: 100vh;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-neutral-950;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-neutral-800 rounded-full;
+  border: 2px solid #0a0a0a;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-neutral-700;
 }

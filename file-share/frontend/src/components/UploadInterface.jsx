@@ -15,7 +15,7 @@ export function UploadInterface() {
     const [file, setFile] = useState(null);
     const [uploadState, setUploadState] = useState('idle');
     const [progress, setProgress] = useState(0);
-    const [uploadSpeed, setUploadSpeed] = useState(0); // bytes per second
+    const [uploadSpeed, setUploadSpeed] = useState(0);
     const [uploadedBytes, setUploadedBytes] = useState(0);
     const [totalBytes, setTotalBytes] = useState(0);
     const [shareLink, setShareLink] = useState('');
@@ -26,34 +26,25 @@ export function UploadInterface() {
     // Resume state
     const [pendingUpload, setPendingUpload] = useState(null);
 
-    // Expiry state
+    // Settings / Options
+    const [showSettings, setShowSettings] = useState(false);
     const [expiry, setExpiry] = useState('7d');
     const [showExpiryDropdown, setShowExpiryDropdown] = useState(false);
     const [customValue, setCustomValue] = useState('');
     const [customUnit, setCustomUnit] = useState('minutes');
-
-    // Password state
     const [enablePassword, setEnablePassword] = useState(false);
     const [password, setPassword] = useState('');
-
-    // Scheduled Access state
     const [enableScheduledAccess, setEnableScheduledAccess] = useState(false);
     const [releaseDate, setReleaseDate] = useState('');
 
-
-    // Check for pending uploads on mount
     useEffect(() => {
         const pending = UploadManager.hasPendingUpload();
-        if (pending) {
-            setPendingUpload(pending);
-        }
+        if (pending) setPendingUpload(pending);
     }, []);
 
-    // Network status detection for auto-pause/resume
     useEffect(() => {
         const handleOffline = () => {
             if (uploadState === 'uploading') {
-                // Network lost - pause the upload
                 uploadManager.pause();
                 setUploadState('paused');
             }
@@ -61,20 +52,16 @@ export function UploadInterface() {
 
         const handleOnline = () => {
             if (uploadState === 'paused' && file) {
-                // Network restored - auto resume
                 const pending = UploadManager.hasPendingUpload();
                 if (pending && UploadManager.fileMatchesPending(file, pending)) {
-                    // Resume upload
                     setUploadState('uploading');
                     setUploadSpeed(0);
-
                     uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
                         setProgress(Math.round((uploadedChunks / totalChunks) * 100));
                         if (speed) setUploadSpeed(speed);
                         if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
                         if (totalBytes !== undefined) setTotalBytes(totalBytes);
                     };
-
                     uploadManager.resumeUpload(file, uploadManager.onProgress)
                         .then(result => {
                             if (result.success) {
@@ -83,17 +70,13 @@ export function UploadInterface() {
                                 setPendingUpload(null);
                             }
                         })
-                        .catch(() => {
-                            // Stay paused if resume fails, will retry on next online event
-                            setUploadState('paused');
-                        });
+                        .catch(() => setUploadState('paused'));
                 }
             }
         };
 
         window.addEventListener('offline', handleOffline);
         window.addEventListener('online', handleOnline);
-
         return () => {
             window.removeEventListener('offline', handleOffline);
             window.removeEventListener('online', handleOnline);
@@ -104,13 +87,9 @@ export function UploadInterface() {
         const selectedFile = e.target.files?.[0];
         if (selectedFile) {
             setFile(selectedFile);
-            // Check if this file matches a pending upload
             if (pendingUpload && UploadManager.fileMatchesPending(selectedFile, pendingUpload)) {
                 setUploadState('resumable');
-                // Calculate starting progress
-                const resumeProgress = Math.round(
-                    (pendingUpload.completedParts?.length / pendingUpload.totalParts) * 100
-                );
+                const resumeProgress = Math.round((pendingUpload.completedParts?.length / pendingUpload.totalParts) * 100);
                 setProgress(resumeProgress);
             } else {
                 setUploadState('ready');
@@ -122,31 +101,17 @@ export function UploadInterface() {
     const handleFolderSelect = async (e) => {
         const files = Array.from(e.target.files);
         if (files.length === 0) return;
-
         setUploadState('compressing');
-
         try {
-            // Dynamically import JSZip
             const JSZip = (await import('jszip')).default;
             const zip = new JSZip();
-
-            // Add all files to zip maintaining folder structure
             for (const file of files) {
                 const path = file.webkitRelativePath || file.name;
                 zip.file(path, file);
             }
-
-            // Generate ZIP file
-            const zipBlob = await zip.generateAsync({
-                type: 'blob',
-                compression: 'DEFLATE',
-                compressionOptions: { level: 6 }
-            });
-
-            // Get folder name from first file's path
+            const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
             const folderName = files[0].webkitRelativePath.split('/')[0];
             const zipFile = new File([zipBlob], `${folderName}.zip`, { type: 'application/zip' });
-
             setFile(zipFile);
             setUploadState('ready');
         } catch {
@@ -169,82 +134,62 @@ export function UploadInterface() {
         if (expiry === 'forever') return 0;
         if (expiry === 'custom') {
             const val = parseInt(customValue) || 0;
-            if (customUnit === 'minutes') return val * 60 * 1000;
-            if (customUnit === 'hours') return val * 60 * 60 * 1000;
-            return 0;
+            return customUnit === 'minutes' ? val * 60 * 1000 : val * 60 * 60 * 1000;
         }
         return EXPIRY_OPTIONS.find(o => o.value === expiry)?.ms || 0;
     };
 
     const handleUpload = async () => {
         if (!file) return;
-
         setUploadState('uploading');
         setUploadSpeed(0);
-
         uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
             setProgress(Math.round((uploadedChunks / totalChunks) * 100));
             if (speed) setUploadSpeed(speed);
             if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
             if (totalBytes !== undefined) setTotalBytes(totalBytes);
         };
-
         const result = await uploadManager.uploadFile(file, {
             expiryMs: getExpiryMs(),
             selfDestruct: expiry === 'self-destruct',
             password: enablePassword && password ? password : null,
             releaseDate: enableScheduledAccess && releaseDate ? new Date(releaseDate).toISOString() : null
         });
-
         if (result.success) {
             setShareLink(result.shareLink);
             setUploadState('completed');
         }
     };
 
-
-
-
-
     const handleResume = async () => {
         if (!file) return;
-
-        // Check if we have pending upload data
         const pending = pendingUpload || UploadManager.hasPendingUpload();
-
         if (!pending || !UploadManager.fileMatchesPending(file, pending)) {
-            // No matching pending upload, start fresh
             setUploadState('ready');
             return;
         }
-
         setUploadState('uploading');
         setUploadSpeed(0);
-
         uploadManager.onProgress = ({ uploadedChunks, totalChunks, speed, bytesUploaded, totalBytes }) => {
             setProgress(Math.round((uploadedChunks / totalChunks) * 100));
             if (speed) setUploadSpeed(speed);
             if (bytesUploaded !== undefined) setUploadedBytes(bytesUploaded);
             if (totalBytes !== undefined) setTotalBytes(totalBytes);
         };
-
         try {
             const result = await uploadManager.resumeUpload(file, uploadManager.onProgress);
-
             if (result.success) {
                 setShareLink(result.shareLink);
                 setUploadState('completed');
                 setPendingUpload(null);
             }
         } catch {
-            // If resume fails, start fresh
             setUploadState('ready');
             setPendingUpload(null);
             UploadManager.clearPendingUpload();
         }
     };
 
-    // Dismiss pending upload notification
     const dismissPendingUpload = () => {
         UploadManager.clearPendingUpload();
         setPendingUpload(null);
@@ -253,10 +198,12 @@ export function UploadInterface() {
     const handleCancel = () => {
         uploadManager.cancel();
         UploadManager.clearPendingUpload();
-        setUploadState('idle');
+        setUploadState('idle'); // Back to idle to allow fresh start
         setProgress(0);
         setFile(null);
         setPendingUpload(null);
+        setUploadedBytes(0);
+        setTotalBytes(0);
     };
 
     const handleCopy = () => {
@@ -273,13 +220,13 @@ export function UploadInterface() {
         return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
     };
 
-    const formatSpeed = (bytesPerSecond) => {
-        if (!bytesPerSecond || bytesPerSecond === 0) return '0 KB/s';
+    const formatSpeed = (bps) => {
+        if (!bps) return '0 KB/s';
         const k = 1024;
-        if (bytesPerSecond < k) return bytesPerSecond.toFixed(0) + ' B/s';
-        if (bytesPerSecond < k * k) return (bytesPerSecond / k).toFixed(1) + ' KB/s';
-        if (bytesPerSecond < k * k * k) return (bytesPerSecond / (k * k)).toFixed(1) + ' MB/s';
-        return (bytesPerSecond / (k * k * k)).toFixed(2) + ' GB/s';
+        if (bps < k) return bps.toFixed(0) + ' B/s';
+        if (bps < k * k) return (bps / k).toFixed(1) + ' KB/s';
+        if (bps < k * k * k) return (bps / (k * k)).toFixed(1) + ' MB/s';
+        return (bps / (k * k * k)).toFixed(2) + ' GB/s';
     };
 
     const resetUpload = () => {
@@ -289,393 +236,209 @@ export function UploadInterface() {
         setShareLink('');
         setPassword('');
         setEnablePassword(false);
+        setUploadedBytes(0);
+        setTotalBytes(0);
     };
 
     const getSelectedLabel = () => {
-        if (expiry === 'custom') {
-            return customValue ? `${customValue} ${customUnit}` : 'Custom';
-        }
+        if (expiry === 'custom') return customValue ? `${customValue} ${customUnit}` : 'Custom';
         return EXPIRY_OPTIONS.find(o => o.value === expiry)?.label || '7 Days';
     };
 
     return (
-        <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-            <div className="w-full max-w-md">
-                <div className="bg-slate-900 rounded-2xl border border-slate-800 p-8">
-                    {/* Logo */}
-                    <div className="text-center mb-8">
-                        <h1 className="text-3xl font-bold text-white">QuickDrop</h1>
-                        <p className="text-slate-500 mt-1 text-sm">Fast & simple file sharing</p>
-                    </div>
+        <div className="min-h-screen flex items-center justify-center p-4">
+            <div className={`w-full max-w-sm transition-all duration-500 ease-out ${uploadState === 'completed' ? 'scale-100' : 'scale-100'}`}>
 
-                    {/* Pending Upload Notification */}
+                {/* Minimal Header */}
+                <div className="text-center mb-8">
+                    <h1 className="text-xl font-bold tracking-tight text-neutral-200">QuickDrop</h1>
+                </div>
+
+                {/* Main Card */}
+                <div className="bg-[#0a0a0a] border border-neutral-800 rounded-2xl p-6 shadow-2xl shadow-black/50 relative overflow-hidden group">
+
+                    {/* Glass sheen effect */}
+                    <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
+                    {/* Pending Upload Alert */}
                     {pendingUpload && uploadState === 'idle' && (
-                        <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
-                            <div className="flex items-start gap-3">
-                                <div className="w-10 h-10 bg-amber-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                                    <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                    </svg>
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    <p className="text-amber-200 font-medium text-sm">Incomplete Upload Found</p>
-                                    <p className="text-amber-200/70 text-xs mt-1 truncate">{pendingUpload.fileName}</p>
-                                    <p className="text-amber-200/50 text-xs mt-0.5">
-                                        {pendingUpload.completedParts?.length || 0} of {pendingUpload.totalParts} parts uploaded
-                                    </p>
-                                    <p className="text-amber-200/70 text-xs mt-2">
-                                        Select the same file to resume uploading
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={dismissPendingUpload}
-                                    className="text-amber-400 hover:text-amber-300 p-1"
-                                    title="Dismiss"
-                                >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
-                            </div>
+                        <div className="mb-6 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg flex items-center justify-between animate-fade-in">
+                            <span className="text-amber-200 text-xs font-medium truncate flex-1 mr-2">
+                                Unfinished upload: {pendingUpload.fileName}
+                            </span>
+                            <button onClick={dismissPendingUpload} className="text-amber-500 hover:text-amber-400">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                            </button>
                         </div>
                     )}
 
-                    {/* Upload Zone */}
+                    {/* IDLE / READY STATE */}
                     {(uploadState === 'idle' || uploadState === 'ready' || uploadState === 'resumable') && (
-                        <>
+                        <div className="animate-fade-in">
                             <div
-                                className={`relative border-2 border-dashed rounded-xl p-8 transition-colors
-                                    ${isDragging ? 'border-blue-500 bg-blue-500/5' : 'border-slate-700 hover:border-slate-600'}`}
+                                className={`relative border border-dashed rounded-xl h-48 flex flex-col items-center justify-center text-center transition-all duration-300
+                                    ${isDragging ? 'border-indigo-500 bg-indigo-500/5' : 'border-neutral-800 hover:border-neutral-700 bg-neutral-900/50'}`}
                                 onDrop={handleDrop}
                                 onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                                 onDragLeave={() => setIsDragging(false)}
                             >
+                                <input id="file-input" type="file" onChange={handleFileSelect} className="hidden" />
+                                <input id="folder-input" type="file" webkitdirectory="" directory="" multiple onChange={handleFolderSelect} className="hidden" />
 
                                 {file ? (
-                                    <div className="text-center">
-                                        <div className="w-14 h-14 mx-auto mb-3 bg-slate-800 rounded-xl flex items-center justify-center">
-                                            <svg className="w-7 h-7 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                            </svg>
+                                    <div className="px-4">
+                                        <div className="w-10 h-10 mx-auto mb-3 bg-neutral-800 rounded-lg flex items-center justify-center text-indigo-400">
+                                            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                                         </div>
-                                        <p className="text-white font-medium truncate">{file.name}</p>
-                                        <p className="text-slate-500 text-sm mt-1">{formatFileSize(file.size)}</p>
+                                        <p className="text-neutral-200 font-medium text-sm truncate max-w-[200px]">{file.name}</p>
+                                        <p className="text-neutral-500 text-xs mt-1">{formatFileSize(file.size)}</p>
+                                        <button onClick={() => setFile(null)} className="mt-3 text-xs text-neutral-500 hover:text-red-400 transition-colors">Change file</button>
                                     </div>
                                 ) : (
-                                    <div className="text-center space-y-6">
-                                        <div className="w-20 h-20 mx-auto bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20">
-                                            <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                            </svg>
+                                    <>
+                                        <button onClick={() => document.getElementById('file-input').click()} className="absolute inset-0 z-10 w-full h-full cursor-pointer" />
+                                        <div className="pointer-events-none">
+                                            <svg className="w-8 h-8 mx-auto text-neutral-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
+                                            <p className="text-sm text-neutral-400 font-medium">Drop file to upload</p>
+                                            <p className="text-xs text-neutral-600 mt-1">or click to browse</p>
                                         </div>
-
-                                        <div>
-                                            <h2 className="text-2xl font-bold text-white mb-2">Drop your file here</h2>
-                                            <p className="text-slate-400">or click to browse</p>
-                                        </div>
-
-                                        <div className="flex gap-3 justify-center">
-                                            <button
-                                                onClick={() => document.getElementById('file-input-btn').click()}
-                                                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-all hover:scale-105"
-                                            >
-                                                📄 Choose File
-                                            </button>
-                                            <button
-                                                onClick={() => document.getElementById('folder-input').click()}
-                                                className="px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-xl transition-all hover:scale-105"
-                                            >
-                                                📁 Choose Folder
-                                            </button>
-                                        </div>
-
-                                        <input
-                                            id="file-input-btn"
-                                            type="file"
-                                            onChange={handleFileSelect}
-                                            className="hidden"
-                                        />
-                                        <input
-                                            id="folder-input"
-                                            type="file"
-                                            webkitdirectory=""
-                                            directory=""
-                                            multiple
-                                            onChange={handleFolderSelect}
-                                            className="hidden"
-                                        />
-                                    </div>
+                                    </>
                                 )}
                             </div>
 
-                            {/* Options */}
-                            {file && (
-                                <div className="mt-5 space-y-4">
-                                    {/* Expiry Selector */}
-                                    <div>
-                                        <label className="block text-slate-400 text-sm mb-2">Expires after</label>
-                                        <div className="relative">
-                                            <button
-                                                onClick={() => setShowExpiryDropdown(!showExpiryDropdown)}
-                                                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-left text-white flex items-center justify-between hover:border-slate-600 transition-colors"
-                                            >
-                                                <span>{getSelectedLabel()}</span>
-                                                <svg className={`w-5 h-5 text-slate-400 transition-transform ${showExpiryDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                </svg>
-                                            </button>
+                            {/* Actions / Settings Toggle */}
+                            <div className="mt-4 flex items-center justify-between">
+                                <button
+                                    onClick={() => document.getElementById('folder-input').click()}
+                                    className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
+                                >
+                                    Upload folder
+                                </button>
+                                {file && (
+                                    <button
+                                        onClick={() => setShowSettings(!showSettings)}
+                                        className={`flex items-center gap-1.5 text-xs transition-colors ${showSettings ? 'text-indigo-400' : 'text-neutral-500 hover:text-neutral-300'}`}
+                                    >
+                                        <span>Settings</span>
+                                        <svg className={`w-3.5 h-3.5 transition-transform ${showSettings ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                    </button>
+                                )}
+                            </div>
 
-                                            {showExpiryDropdown && (
-                                                <div className="absolute z-10 w-full mt-2 bg-slate-800 border border-slate-700 rounded-xl shadow-xl overflow-hidden">
-                                                    {EXPIRY_OPTIONS.map((option) => (
-                                                        <button
-                                                            key={option.value}
-                                                            onClick={() => {
-                                                                setExpiry(option.value);
-                                                                if (option.value !== 'custom') setShowExpiryDropdown(false);
-                                                            }}
-                                                            className={`w-full px-4 py-3 text-left hover:bg-slate-700 transition-colors flex items-center justify-between
-                                                                ${expiry === option.value ? 'bg-slate-700' : ''}`}
-                                                        >
-                                                            <div>
-                                                                <span className="text-white">{option.label}</span>
-                                                                {option.description && (
-                                                                    <p className="text-slate-500 text-xs mt-0.5">{option.description}</p>
-                                                                )}
-                                                            </div>
-                                                            {expiry === option.value && (
-                                                                <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                                                </svg>
-                                                            )}
-                                                        </button>
-                                                    ))}
-
-                                                    {expiry === 'custom' && (
-                                                        <div className="p-3 border-t border-slate-700">
-                                                            <div className="flex gap-2">
-                                                                <input
-                                                                    type="number"
-                                                                    value={customValue}
-                                                                    onChange={(e) => setCustomValue(e.target.value)}
-                                                                    placeholder="Value"
-                                                                    min="1"
-                                                                    className="flex-1 px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 outline-none focus:border-blue-500"
-                                                                />
-                                                                <select
-                                                                    value={customUnit}
-                                                                    onChange={(e) => setCustomUnit(e.target.value)}
-                                                                    className="px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white outline-none focus:border-blue-500"
-                                                                >
-                                                                    <option value="minutes">Minutes</option>
-                                                                    <option value="hours">Hours</option>
-                                                                </select>
-                                                            </div>
-                                                            <button
-                                                                onClick={() => setShowExpiryDropdown(false)}
-                                                                className="w-full mt-2 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
-                                                            >
-                                                                Confirm
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
+                            {/* Collapsible Settings */}
+                            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${showSettings && file ? 'max-h-96 opacity-100 mt-4' : 'max-h-0 opacity-0'}`}>
+                                <div className="space-y-4 p-4 bg-neutral-900/30 rounded-xl border border-neutral-800/50">
+                                    {/* Expiry */}
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-xs text-neutral-400">Expires</span>
+                                        <select
+                                            value={expiry}
+                                            onChange={(e) => setExpiry(e.target.value)}
+                                            className="bg-transparent text-xs text-indigo-400 outline-none cursor-pointer text-right"
+                                        >
+                                            {EXPIRY_OPTIONS.map(opt => <option key={opt.value} value={opt.value} className="bg-neutral-900 text-neutral-300">{opt.label}</option>)}
+                                        </select>
                                     </div>
 
-                                    {/* Password Protection */}
-                                    <div>
-                                        <div className="flex items-center justify-between mb-2">
-                                            <label className="text-slate-400 text-sm">Password protect</label>
-                                            <button
-                                                onClick={() => setEnablePassword(!enablePassword)}
-                                                className={`w-10 h-6 rounded-full transition-colors relative ${enablePassword ? 'bg-blue-600' : 'bg-slate-700'}`}
-                                            >
-                                                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${enablePassword ? 'left-5' : 'left-1'}`} />
+                                    {/* Password Toggle */}
+                                    <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs text-neutral-400">Password</span>
+                                            <button onClick={() => setEnablePassword(!enablePassword)} className={`w-8 h-4 rounded-full relative transition-colors ${enablePassword ? 'bg-indigo-500' : 'bg-neutral-700'}`}>
+                                                <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${enablePassword ? 'left-4.5' : 'left-0.5'}`} />
                                             </button>
                                         </div>
                                         {enablePassword && (
-                                            <input
-                                                type="password"
-                                                value={password}
-                                                onChange={(e) => setPassword(e.target.value)}
-                                                placeholder="Enter password"
-                                                className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white placeholder-slate-500 outline-none focus:border-blue-500 transition-colors"
-                                            />
-                                        )}
-                                    </div>
-
-                                    {/* Scheduled Access */}
-                                    <div>
-                                        <div className="flex items-center justify-between mb-2">
-                                            <label className="text-slate-400 text-sm">Scheduled access</label>
-                                            <button
-                                                onClick={() => setEnableScheduledAccess(!enableScheduledAccess)}
-                                                className={`w-10 h-6 rounded-full transition-colors relative ${enableScheduledAccess ? 'bg-blue-600' : 'bg-slate-700'}`}
-                                            >
-                                                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${enableScheduledAccess ? 'left-5' : 'left-1'}`} />
-                                            </button>
-                                        </div>
-                                        {enableScheduledAccess && (
-                                            <div>
-                                                <input
-                                                    type="datetime-local"
-                                                    value={releaseDate}
-                                                    onChange={(e) => setReleaseDate(e.target.value)}
-                                                    min={new Date().toISOString().slice(0, 16)}
-                                                    className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white outline-none focus:border-blue-500 transition-colors"
-                                                />
-                                                <p className="text-xs text-slate-500 mt-2">File will be accessible after this date/time</p>
-                                            </div>
+                                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Secret password"
+                                                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-indigo-500/50" />
                                         )}
                                     </div>
                                 </div>
-                            )}
-                        </>
-                    )}
-
-                    {/* Upload Button */}
-                    {file && uploadState === 'ready' && (
-                        <button
-                            onClick={handleUpload}
-                            disabled={enablePassword && !password}
-                            className={`w-full mt-5 py-3 bg-blue-600 text-white font-medium rounded-xl transition-colors
-                                ${enablePassword && !password ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-500'}`}
-                        >
-                            Upload
-                        </button>
-                    )}
-
-                    {/* Resume Upload Button */}
-                    {file && uploadState === 'resumable' && (
-                        <div className="mt-5 space-y-3">
-                            {/* Resume Progress Bar */}
-                            <div className="space-y-2">
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-slate-400">Previous progress</span>
-                                    <span className="text-green-400">{progress}%</span>
-                                </div>
-                                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                                    <div
-                                        className="h-full bg-green-500 transition-all duration-300"
-                                        style={{ width: `${progress}%` }}
-                                    />
-                                </div>
-                            </div>
-                            <button
-                                onClick={handleResume}
-                                className="w-full py-3 bg-green-600 hover:bg-green-500 text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
-                            >
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                                </svg>
-                                Resume Upload
-                            </button>
-                            <button
-                                onClick={() => {
-                                    dismissPendingUpload();
-                                    setUploadState('ready');
-                                }}
-                                className="w-full py-2 text-slate-400 hover:text-white text-sm transition-colors"
-                            >
-                                Start fresh instead
-                            </button>
-                        </div>
-                    )}
-
-                    {/* Progress Section */}
-                    {(uploadState === 'uploading' || uploadState === 'paused') && (
-                        <div className="space-y-5">
-                            <div className="text-center">
-                                <p className="text-white font-medium mb-1">
-                                    {uploadState === 'paused' ? 'Paused' : 'Uploading...'}
-                                </p>
-                                <p className="text-slate-500 text-sm truncate">{file?.name}</p>
                             </div>
 
-                            <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                                <div
-                                    className="h-full bg-blue-500 transition-all duration-300"
-                                    style={{ width: `${progress}%` }}
-                                />
-                            </div>
-
-                            {/* Progress and Speed Display */}
-                            <div className="flex justify-between items-center text-sm">
-                                <div className="text-slate-400">
-                                    <span className="font-medium text-slate-300">{progress}%</span>
-                                    <span className="mx-2 text-slate-600">•</span>
-                                    <span>{formatFileSize(uploadedBytes)} of {formatFileSize(totalBytes)}</span>
-                                </div>
-                                <div className="text-emerald-400 font-medium">
-                                    ⚡ {formatSpeed(uploadSpeed)}
-                                </div>
-                            </div>
-
-                            {/* Cancel button only - pause/resume is automatic based on network */}
-                            <div className="flex gap-3">
-                                {uploadState === 'paused' && (
-                                    <div className="flex-1 py-2.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 font-medium rounded-xl text-center text-sm">
-                                        ⏸️ Waiting for connection...
-                                    </div>
-                                )}
-                                <button onClick={handleCancel} className={`${uploadState === 'paused' ? 'flex-1' : 'w-full'} py-2.5 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 font-medium rounded-xl transition-colors`}>
-                                    Cancel
+                            {/* Main Action Button */}
+                            {file && (
+                                <button
+                                    onClick={uploadState === 'resumable' ? handleResume : handleUpload}
+                                    disabled={enablePassword && !password}
+                                    className={`w-full mt-6 py-3 rounded-xl font-medium text-sm transition-all duration-300 
+                                        ${enablePassword && !password ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/20'}`}
+                                >
+                                    {uploadState === 'resumable' ? 'Resume Upload' : 'Upload File'}
                                 </button>
-                            </div>
+                            )}
                         </div>
                     )}
 
-                    {/* Success Section */}
-                    {uploadState === 'completed' && (
-                        <div className="text-center space-y-5">
-                            <div className="w-16 h-16 mx-auto bg-emerald-500/10 rounded-full flex items-center justify-center">
-                                <svg className="w-8 h-8 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    {/* UPLOADING STATE */}
+                    {(uploadState === 'uploading' || uploadState === 'paused' || uploadState === 'compressing') && (
+                        <div className="animate-fade-in text-center py-4">
+                            <div className="mb-6 relative w-24 h-24 mx-auto flex items-center justify-center">
+                                <svg className="w-full h-full -rotate-90 text-neutral-800" viewBox="0 0 36 36">
+                                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="2" />
                                 </svg>
+                                <svg className="absolute top-0 left-0 w-full h-full -rotate-90 text-indigo-500 drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]" viewBox="0 0 36 36">
+                                    <path
+                                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeDasharray={`${progress}, 100`}
+                                    />
+                                </svg>
+                                <div className="absolute flex flex-col items-center">
+                                    <span className="text-xl font-bold text-white">{progress}%</span>
+                                </div>
                             </div>
 
-                            <div>
-                                <h2 className="text-xl font-semibold text-white">Upload Complete</h2>
-                                <p className="text-slate-500 text-sm mt-1">Share this link</p>
+                            <h3 className="text-neutral-200 font-medium text-sm mb-1">
+                                {uploadState === 'compressing' ? 'Zipping files...' : uploadState === 'paused' ? 'Connection Lost' : 'Uploading...'}
+                            </h3>
+                            <p className="text-neutral-500 text-xs mb-6 font-mono">
+                                {uploadState === 'paused' ? 'Waiting for internet...' : `${formatFileSize(uploadedBytes)} / ${formatFileSize(totalBytes)}`}
+                            </p>
+
+                            <button onClick={handleCancel} className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors">
+                                Cancel
+                            </button>
+                        </div>
+                    )}
+
+                    {/* COMPLETED STATE */}
+                    {uploadState === 'completed' && (
+                        <div className="animate-fade-in text-center py-2">
+                            <div className="w-12 h-12 mx-auto bg-indigo-500/10 rounded-full flex items-center justify-center mb-4 text-indigo-400">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                             </div>
 
-                            <div className="flex gap-2 p-1.5 bg-slate-800 rounded-lg">
-                                <input
-                                    type="text"
-                                    value={shareLink}
-                                    readOnly
-                                    className="flex-1 bg-transparent text-slate-300 text-sm px-3 outline-none truncate"
-                                />
+                            <h2 className="text-lg font-bold text-white mb-1">Link Ready</h2>
+                            <p className="text-neutral-500 text-xs mb-6">File uploaded successfully</p>
+
+                            <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-xl p-1 pr-2 mb-4">
+                                <input type="text" readOnly value={shareLink} className="flex-1 bg-transparent border-none text-xs text-neutral-300 px-3 outline-none" />
                                 <button
                                     onClick={handleCopy}
-                                    className={`px-4 py-2 rounded-md font-medium text-sm transition-colors ${copied ? 'bg-emerald-500 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'
-                                        }`}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${copied ? 'bg-emerald-500 text-white' : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'}`}
                                 >
-                                    {copied ? 'Copied!' : 'Copy'}
+                                    {copied ? 'Copied' : 'Copy'}
                                 </button>
                             </div>
 
-                            <button
-                                onClick={() => window.location.href = `/analytics/${uploadManager.fileId}`}
-                                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl transition-colors"
-                            >
-                                📊 View Analytics
-                            </button>
-
-                            <button
-                                onClick={resetUpload}
-                                className="w-full py-2.5 border border-slate-700 hover:border-slate-600 text-slate-400 hover:text-white font-medium rounded-xl transition-colors"
-                            >
-                                Upload Another
-                            </button>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button onClick={() => window.location.href = `/analytics/${uploadManager.fileId}`} className="py-2.5 rounded-xl border border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700 text-xs font-medium transition-colors">
+                                    Analytics
+                                </button>
+                                <button onClick={resetUpload} className="py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors shadow-lg shadow-indigo-900/20">
+                                    Send Another
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
 
-                <p className="text-center text-slate-600 text-xs mt-5">
-                    No limits • No registration
+                {/* Footer */}
+                <p className="text-center text-neutral-700 text-[10px] mt-8 tracking-widest uppercase">
+                    Simple • Private • Fast
                 </p>
             </div>
         </div>
