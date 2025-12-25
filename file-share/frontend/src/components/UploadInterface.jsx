@@ -451,22 +451,22 @@ export function UploadInterface() {
 
                                     {/* Custom Expiry Input */}
                                     {expiry === 'custom' && (
-                                        <div className="flex items-center gap-2 mt-2">
+                                        <div className="flex items-center gap-1.5 ml-6">
                                             <input
                                                 type="number"
                                                 min="1"
                                                 value={customValue}
                                                 onChange={(e) => setCustomValue(e.target.value)}
                                                 placeholder="30"
-                                                className="w-20 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-indigo-500/50"
+                                                className="w-14 bg-transparent border-b border-neutral-700 px-1 py-0.5 text-xs text-indigo-400 text-center outline-none focus:border-indigo-500 transition-colors"
                                             />
                                             <select
                                                 value={customUnit}
                                                 onChange={(e) => setCustomUnit(e.target.value)}
-                                                className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-300 outline-none cursor-pointer focus:border-indigo-500/50"
+                                                className="bg-transparent border-b border-neutral-700 px-1 py-0.5 text-xs text-indigo-400 outline-none cursor-pointer focus:border-indigo-500 transition-colors"
                                             >
-                                                <option value="minutes">Minutes</option>
-                                                <option value="hours">Hours</option>
+                                                <option value="minutes" className="bg-neutral-900">min</option>
+                                                <option value="hours" className="bg-neutral-900">hrs</option>
                                             </select>
                                         </div>
                                     )}
