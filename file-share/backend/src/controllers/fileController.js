@@ -1,5 +1,4 @@
 import bcrypt from 'bcryptjs';
-import geoip from 'geoip-lite';
 import useragent from 'useragent';
 import Link from '../models/Link.js';
 import Analytics from '../models/Analytics.js';
@@ -185,8 +184,16 @@ export const downloadFile = async (req, res) => {
         }
 
         // Track Analytics
-        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-        const geo = geoip.lookup(ip);
+        let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        // Get the first IP if there are multiple (proxy chain)
+        if (ip && ip.includes(',')) {
+            ip = ip.split(',')[0].trim();
+        }
+        // Remove IPv6 prefix if present
+        if (ip && ip.startsWith('::ffff:')) {
+            ip = ip.substring(7);
+        }
+
         const agent = useragent.parse(req.headers['user-agent']);
 
         const userAgentString = req.headers['user-agent'] || '';
@@ -218,12 +225,31 @@ export const downloadFile = async (req, res) => {
             browser = agent.toAgent() || 'Unknown Browser';
         }
 
+        // Get geolocation from ip-api.com (free, more accurate than geoip-lite)
+        let country = 'Unknown';
+        let city = 'Unknown';
+        try {
+            // Skip localhost IPs
+            if (ip && ip !== '127.0.0.1' && ip !== '::1' && !ip.startsWith('192.168.') && !ip.startsWith('10.')) {
+                const geoResponse = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,city`);
+                if (geoResponse.ok) {
+                    const geoData = await geoResponse.json();
+                    if (geoData.status === 'success') {
+                        country = geoData.country || 'Unknown';
+                        city = geoData.city || 'Unknown';
+                    }
+                }
+            }
+        } catch {
+            // Silent fail - use defaults
+        }
+
         // Log analytics asynchronously
         new Analytics({
             linkId: link.linkId,
             ipAddress: ip,
-            country: geo ? geo.country : 'Unknown',
-            city: geo ? geo.city : 'Unknown',
+            country: country,
+            city: city,
             device: `${deviceType} (${os})`,
             browser: browser,
             userAgent: userAgentString
