@@ -24,7 +24,11 @@ export const getAnalytics = async (req, res) => {
             downloads: analytics.map(a => ({
                 timestamp: a.timestamp,
                 country: a.country,
+                region: a.region,
                 city: a.city,
+                zip: a.zip,
+                isp: a.isp,
+                timezone: a.timezone,
                 device: a.device,
                 browser: a.browser,
                 ipAddress: a.ipAddress ? a.ipAddress.substring(0, 10) + '...' : 'Unknown'

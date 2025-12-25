@@ -227,16 +227,24 @@ export const downloadFile = async (req, res) => {
 
         // Get geolocation from ip-api.com (free, more accurate than geoip-lite)
         let country = 'Unknown';
+        let region = 'Unknown';
         let city = 'Unknown';
+        let zip = '';
+        let isp = '';
+        let timezone = '';
         try {
             // Skip localhost IPs
             if (ip && ip !== '127.0.0.1' && ip !== '::1' && !ip.startsWith('192.168.') && !ip.startsWith('10.')) {
-                const geoResponse = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,city`);
+                const geoResponse = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city,zip,isp,timezone`);
                 if (geoResponse.ok) {
                     const geoData = await geoResponse.json();
                     if (geoData.status === 'success') {
                         country = geoData.country || 'Unknown';
+                        region = geoData.regionName || 'Unknown';
                         city = geoData.city || 'Unknown';
+                        zip = geoData.zip || '';
+                        isp = geoData.isp || '';
+                        timezone = geoData.timezone || '';
                     }
                 }
             }
@@ -249,7 +257,11 @@ export const downloadFile = async (req, res) => {
             linkId: link.linkId,
             ipAddress: ip,
             country: country,
+            region: region,
             city: city,
+            zip: zip,
+            isp: isp,
+            timezone: timezone,
             device: `${deviceType} (${os})`,
             browser: browser,
             userAgent: userAgentString

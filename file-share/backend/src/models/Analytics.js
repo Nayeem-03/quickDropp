@@ -11,10 +11,14 @@ const analyticsSchema = new mongoose.Schema({
         type: Date,
         default: Date.now
     },
-    ipAddress: String, // Anonymize if needed clearly
+    ipAddress: String,
     country: String,
+    region: String,    // State/Province
     city: String,
-    device: String, // e.g., "iPhone", "Windows"
+    zip: String,       // Postal code
+    isp: String,       // Internet Service Provider
+    timezone: String,
+    device: String,
     browser: String,
     referer: String,
     userAgent: String
