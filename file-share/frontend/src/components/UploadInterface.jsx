@@ -456,19 +456,19 @@ export function UploadInterface() {
 
                                     {/* Custom Expiry Input */}
                                     {expiry === 'custom' && (
-                                        <div className="flex items-center gap-2 pl-6">
+                                        <div className="flex items-center gap-2 mt-2">
                                             <input
                                                 type="number"
                                                 min="1"
                                                 value={customValue}
                                                 onChange={(e) => setCustomValue(e.target.value)}
-                                                placeholder="Enter time"
-                                                className="w-20 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-neutral-200 outline-none focus:border-indigo-500/50"
+                                                placeholder="30"
+                                                className="w-20 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-200 outline-none focus:border-indigo-500/50"
                                             />
                                             <select
                                                 value={customUnit}
                                                 onChange={(e) => setCustomUnit(e.target.value)}
-                                                className="bg-neutral-900 border border-neutral-700 rounded-lg px-2 py-1.5 text-xs text-neutral-300 outline-none cursor-pointer"
+                                                className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-300 outline-none cursor-pointer focus:border-indigo-500/50"
                                             >
                                                 <option value="minutes">Minutes</option>
                                                 <option value="hours">Hours</option>
