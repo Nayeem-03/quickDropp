@@ -163,7 +163,7 @@ export function AnalyticsPage() {
                                             </div>
                                             <div>
                                                 <p className="text-neutral-300 font-medium text-sm">
-                                                    {download.city || 'Unknown'}{download.zip ? ` ${download.zip}` : ''}{download.region && download.region !== 'Unknown' ? `, ${download.region}` : ''}, {download.country || 'Unknown'}
+                                                    {download.city || 'Unknown'}{download.region && download.region !== 'Unknown' ? `, ${download.region}` : ''}, {download.country || 'Unknown'}
                                                 </p>
                                                 <p className="text-xs text-neutral-500 mt-0.5 font-mono">
                                                     {download.device} • {download.browser}

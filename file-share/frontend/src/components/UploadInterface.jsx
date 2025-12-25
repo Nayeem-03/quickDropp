@@ -30,9 +30,7 @@ export function UploadInterface() {
     const [pendingUpload, setPendingUpload] = useState(null);
 
     // Settings / Options
-    const [showSettings, setShowSettings] = useState(false);
     const [expiry, setExpiry] = useState('7d');
-    const [showExpiryDropdown, setShowExpiryDropdown] = useState(false);
     const [customValue, setCustomValue] = useState('');
     const [customUnit, setCustomUnit] = useState('minutes');
     const [enablePassword, setEnablePassword] = useState(false);
@@ -342,14 +340,11 @@ export function UploadInterface() {
         setTotalBytes(0);
     };
 
-    const getSelectedLabel = () => {
-        if (expiry === 'custom') return customValue ? `${customValue} ${customUnit}` : 'Custom';
-        return EXPIRY_OPTIONS.find(o => o.value === expiry)?.label || '7 Days';
-    };
+
 
     return (
         <div className="min-h-screen flex items-center justify-center p-4">
-            <div className={`w-full max-w-sm transition-all duration-500 ease-out ${uploadState === 'completed' ? 'scale-100' : 'scale-100'}`}>
+            <div className="w-full max-w-sm">
 
                 {/* Minimal Header */}
                 <div className="text-center mb-8">
