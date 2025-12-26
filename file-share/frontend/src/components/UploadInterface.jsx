@@ -4,9 +4,8 @@ import { UploadManager } from '../services/UploadManager';
 const EXPIRY_OPTIONS = [
     { value: 'self-destruct', label: 'Self Destruct', description: 'Deleted after first download' },
     { value: '5m', label: '5 Minutes', ms: 5 * 60 * 1000 },
-    { value: '30m', label: '30 Minutes', ms: 30 * 60 * 1000 },
+    { value: '1h', label: '1 Hour', ms: 60 * 60 * 1000 },
     { value: '1d', label: '1 Day', ms: 24 * 60 * 60 * 1000 },
-    { value: '7d', label: '7 Days', ms: 7 * 24 * 60 * 60 * 1000 },
     { value: 'forever', label: 'Forever', description: 'Never expires' },
     { value: 'custom', label: 'Custom', description: 'Set your own time' },
 ];
@@ -30,7 +29,8 @@ export function UploadInterface() {
     const [pendingUpload, setPendingUpload] = useState(null);
 
     // Settings / Options
-    const [expiry, setExpiry] = useState('7d');
+    const [expiry, setExpiry] = useState('1h');
+    const [showExpiryDropdown, setShowExpiryDropdown] = useState(false);
     const [customValue, setCustomValue] = useState('');
     const [customUnit, setCustomUnit] = useState('minutes');
     const [enablePassword, setEnablePassword] = useState(false);
@@ -352,7 +352,7 @@ export function UploadInterface() {
                 </div>
 
                 {/* Main Card */}
-                <div className="bg-[#0a0a0a] border border-neutral-800 rounded-2xl p-6 shadow-2xl shadow-black/50 relative overflow-hidden group">
+                <div className="bg-[#0a0a0a] border border-neutral-800 rounded-2xl p-6 shadow-2xl shadow-black/50 relative group">
 
                     {/* Glass sheen effect */}
                     <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
@@ -436,17 +436,30 @@ export function UploadInterface() {
                                             </svg>
                                             <span className="text-xs text-neutral-400">Expires</span>
                                         </div>
-                                        <select
-                                            value={expiry}
-                                            onChange={(e) => setExpiry(e.target.value)}
-                                            className="bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-1.5 text-xs text-indigo-400 outline-none cursor-pointer hover:border-indigo-500/50 focus:border-indigo-500 transition-colors"
-                                        >
-                                            {EXPIRY_OPTIONS.map(opt => (
-                                                <option key={opt.value} value={opt.value} className="bg-neutral-900 text-neutral-300">
-                                                    {opt.label}
-                                                </option>
-                                            ))}
-                                        </select>
+                                        <div className="relative">
+                                            <button
+                                                onClick={() => setShowExpiryDropdown(!showExpiryDropdown)}
+                                                className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-indigo-400 outline-none cursor-pointer hover:border-neutral-600 transition-colors flex items-center gap-2"
+                                            >
+                                                {EXPIRY_OPTIONS.find(o => o.value === expiry)?.label || 'Select'}
+                                                <svg className={`w-3 h-3 transition-transform ${showExpiryDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                                </svg>
+                                            </button>
+                                            {showExpiryDropdown && (
+                                                <div className="absolute right-0 top-full mt-1 bg-neutral-950 border border-neutral-800 rounded-lg py-1 z-50 min-w-[140px] shadow-xl">
+                                                    {EXPIRY_OPTIONS.map(opt => (
+                                                        <button
+                                                            key={opt.value}
+                                                            onClick={() => { setExpiry(opt.value); setShowExpiryDropdown(false); }}
+                                                            className={`w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-800 transition-colors ${expiry === opt.value ? 'text-indigo-400' : 'text-neutral-400'}`}
+                                                        >
+                                                            {opt.label}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
 
                                     {/* Custom Expiry Input */}
