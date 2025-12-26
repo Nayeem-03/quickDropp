@@ -11,7 +11,7 @@ const EXPIRY_OPTIONS = [
 ];
 
 const HISTORY_KEY = 'quickdrop_upload_history';
-const MAX_HISTORY = 20;
+const MAX_HISTORY = 15;
 
 // Upload history helpers
 const getUploadHistory = () => {
