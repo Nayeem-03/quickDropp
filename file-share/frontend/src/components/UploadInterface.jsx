@@ -10,6 +10,32 @@ const EXPIRY_OPTIONS = [
     { value: 'custom', label: 'Custom', description: 'Set your own time' },
 ];
 
+const HISTORY_KEY = 'quickdrop_upload_history';
+const MAX_HISTORY = 20;
+
+// Upload history helpers
+const getUploadHistory = () => {
+    try {
+        const saved = localStorage.getItem(HISTORY_KEY);
+        return saved ? JSON.parse(saved) : [];
+    } catch {
+        return [];
+    }
+};
+
+const saveToHistory = (upload) => {
+    try {
+        const history = getUploadHistory();
+        // Add to front, remove duplicates, limit to MAX_HISTORY
+        const filtered = history.filter(h => h.linkId !== upload.linkId);
+        const updated = [upload, ...filtered].slice(0, MAX_HISTORY);
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
+        return updated;
+    } catch {
+        return [];
+    }
+};
+
 export function UploadInterface() {
     const [file, setFile] = useState(null);
     const [uploadState, setUploadState] = useState('idle');
@@ -38,9 +64,15 @@ export function UploadInterface() {
     const [enableScheduledAccess, setEnableScheduledAccess] = useState(false);
     const [releaseDate, setReleaseDate] = useState('');
 
+    // Upload history
+    const [uploadHistory, setUploadHistory] = useState([]);
+    const [showHistory, setShowHistory] = useState(false);
+
     useEffect(() => {
         const pending = UploadManager.hasPendingUpload();
         if (pending) setPendingUpload(pending);
+        // Load upload history
+        setUploadHistory(getUploadHistory());
     }, []);
 
     useEffect(() => {
@@ -245,6 +277,14 @@ export function UploadInterface() {
         if (result.success) {
             setShareLink(result.shareLink);
             setUploadState('completed');
+            // Save to history
+            const newHistory = saveToHistory({
+                linkId: uploadManager.fileId,
+                fileName: file.name,
+                shareLink: result.shareLink,
+                uploadedAt: new Date().toISOString()
+            });
+            setUploadHistory(newHistory);
         } else if (result.paused || uploadManager.state === 'paused') {
             // Network error caused pause - sync UI from saved state
             syncUIFromLocalStorage();
@@ -611,6 +651,50 @@ export function UploadInterface() {
                         </div>
                     )}
                 </div>
+
+                {/* Recent Uploads Section */}
+                {uploadHistory.length > 0 && uploadState !== 'uploading' && uploadState !== 'compressing' && (
+                    <div className="mt-4">
+                        <button
+                            onClick={() => setShowHistory(!showHistory)}
+                            className="w-full flex items-center justify-between px-4 py-2.5 bg-neutral-900/50 border border-neutral-800/50 rounded-xl text-xs text-neutral-400 hover:text-neutral-300 transition-colors"
+                        >
+                            <span className="flex items-center gap-2">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                Recent Uploads ({uploadHistory.length})
+                            </span>
+                            <svg className={`w-3.5 h-3.5 transition-transform ${showHistory ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+
+                        {showHistory && (
+                            <div className="mt-2 bg-neutral-900/30 border border-neutral-800/50 rounded-xl divide-y divide-neutral-800/50 max-h-[200px] overflow-y-auto">
+                                {uploadHistory.map((item) => (
+                                    <div key={item.linkId} className="p-3 hover:bg-neutral-800/30 transition-colors">
+                                        <p className="text-xs text-neutral-300 font-medium truncate mb-2">{item.fileName}</p>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => { navigator.clipboard.writeText(item.shareLink); }}
+                                                className="flex-1 px-2 py-1 bg-neutral-800 hover:bg-neutral-700 rounded text-[10px] text-neutral-400 hover:text-white transition-colors"
+                                            >
+                                                Copy Link
+                                            </button>
+                                            <button
+                                                onClick={() => window.location.href = `/analytics/${item.linkId}`}
+                                                className="flex-1 px-2 py-1 bg-neutral-800 hover:bg-neutral-700 rounded text-[10px] text-neutral-400 hover:text-white transition-colors"
+                                            >
+                                                Analytics
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* Footer */}
                 <p className="text-center text-neutral-700 text-[10px] mt-8 tracking-widest uppercase">
